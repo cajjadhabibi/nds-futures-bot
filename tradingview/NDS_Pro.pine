@@ -1,0 +1,978 @@
+//@version=6
+// =====================================================================================
+//  NDS – Nodal Displacement Sequencing  |  TradingView indicator (Pine Script v6)
+//  Built from the rules in "NDS_Strategy_V1.2" (Discretionary part):
+//   • Sequencing (core): peak 2 > peak 1, peak 3 > peak 2 → reversal down from 3
+//                        trough 2 < trough 1, trough 3 < trough 2 → reversal up from 3
+//                        lower peaks that do not exceed the current 1 get no number
+//                        every open 1-2 is eventually closed by a 3 (targets/magnets)
+//   • Hook (Type A / B), closing near 86.4% of the T→3 leg
+//   • 123Flag: three rising nodes + pullback Z + spike F above 3 → entry at F,
+//              stop beyond F, TP1 = Z, TP2 = 86.4% of the R→F leg (T)
+//   • Hook-Hook-Rally and the Full Cycle (Hook1 → Hook2 → Rally → Flag → T)
+//   • Price symmetry: AB = CD (legs) and node symmetry (2→3 ≈ 1→2)
+//   • HTF trend from the sequence (last node 3 on HTF)
+//  This is an analysis tool. It does not guarantee any outcome.
+// =====================================================================================
+indicator("NDS – Nodal Displacement Sequencing", shorttitle = "NDS", overlay = true, max_labels_count = 500, max_lines_count = 500, max_boxes_count = 50, max_bars_back = 2000)
+
+// ---------------------------------------------------------------- Inputs
+string G1 = "۱) تنظیمات اصلی / Main"
+string langIn  = input.string("فارسی", "زبان / Language", options = ["فارسی", "English"], group = G1)
+int    pLen    = input.int(5, "طول پیوت (مقیاس فراکتال) / Pivot length", minval = 1, maxval = 50, group = G1, tooltip = "تعداد کندل‌های چپ و راست برای تأیید یک قله/دره (نود). عدد بزرگ‌تر = سایکل‌های بزرگ‌تر. شادوها (High/Low) مبنا هستند، نه بدنه کندل.")
+float  eqTol   = input.float(0.05, "تلورانس نود هم‌سطح (×ATR) / Equal-node tolerance", minval = 0.0, step = 0.01, group = G1, tooltip = "برای اینکه نود بعدی «بالاتر» یا «پایین‌تر» حساب شود باید حداقل این مقدار عبور کند. دوقله/دوکف هم‌اندازه یک نود حساب می‌شوند.")
+int    maxOpen = input.int(10, "حداکثر 1-2 باز در هر سمت / Max open pairs", minval = 2, maxval = 30, group = G1)
+
+string G2 = "۲) هوک و فلگ / Hook & Flag"
+float  lvl864  = input.float(0.864, "سطح بسته شدن هوک / Hook close level", minval = 0.5, maxval = 1.0, step = 0.001, group = G2)
+bool   enfZone = input.bool(true, "الزام ناحیه بازگشت برای تکمیل هوک", group = G2, tooltip = "اگر روشن باشد، هوک فقط وقتی کامل حساب می‌شود که نود 3 آخر بین حداقل و حداکثر بازگشت زیر باشد. طبق جزوه، بستن 123 اولویت دارد؛ با خاموش کردن، فقط سکانس 123 بررسی می‌شود.")
+float  rMin    = input.float(0.70, "حداقل بازگشت هوک", minval = 0.3, maxval = 1.0, step = 0.01, group = G2)
+float  rMax    = input.float(1.00, "حداکثر بازگشت هوک", minval = 0.8, maxval = 1.3, step = 0.01, group = G2)
+float  fExc    = input.float(0.10, "حداقل عبور F از نود 3 (×ATR)", minval = 0.0, step = 0.05, group = G2, tooltip = "طبق سوال 29 جزوه: اگر F هم‌سطح نود 3 باشد فلگ نیست.")
+float  slBuf   = input.float(0.10, "فاصله حدضرر از F (×ATR)", minval = 0.0, step = 0.05, group = G2)
+
+string G3 = "۳) تایم‌فریم بالا / Higher timeframe"
+bool   useHtf  = input.bool(true, "تشخیص روند از تایم‌فریم بالا", group = G3)
+string htfTf   = input.timeframe("240", "تایم‌فریم بالا / HTF", group = G3, tooltip = "سوئینگ: D/H4 – دی‌تریدینگ: H4/H1/M30 – اسکالپ: M30. باید از تایم‌فریم چارت بزرگ‌تر باشد.")
+int    htfLen  = input.int(5, "طول پیوت HTF", minval = 1, maxval = 50, group = G3)
+
+string G5 = "۵) روند چند تایم‌فریمی / Multi-timeframe trend"
+bool   shMtf   = input.bool(true, "نمایش جدول روند تایم‌فریم‌ها", group = G5)
+bool   bgTrend = input.bool(true, "رنگ پس‌زمینه بر اساس روند همین تایم‌فریم", group = G5)
+int    mtfLen  = input.int(5, "طول پیوت برای همه تایم‌فریم‌ها", minval = 1, maxval = 50, group = G5, tooltip = "روند هر تایم‌فریم = جهت حرکت به سمت نود 3 بعدی. بعد از نود 3 سقف‌ها → نزولی (تا نود 3 کف‌ها)، بعد از نود 3 کف‌ها → صعودی (تا نود 3 سقف‌ها).")
+string mPosIn  = input.string("پایین راست", "محل جدول تایم‌فریم‌ها", options = ["بالا راست", "بالا چپ", "پایین راست", "پایین چپ"], group = G5)
+string mtf1 = input.timeframe("1", "تایم‌فریم 1", group = G5)
+string mtf2 = input.timeframe("5", "تایم‌فریم 2", group = G5)
+string mtf3 = input.timeframe("15", "تایم‌فریم 3", group = G5)
+string mtf4 = input.timeframe("30", "تایم‌فریم 4", group = G5)
+string mtf5 = input.timeframe("60", "تایم‌فریم 5", group = G5)
+string mtf6 = input.timeframe("240", "تایم‌فریم 6", group = G5)
+string mtf7 = input.timeframe("D", "تایم‌فریم 7", group = G5)
+
+string G4 = "۴) نمایش / Display"
+bool   shNodes  = input.bool(true, "نمایش شماره نودها (1-2-3)", group = G4)
+bool   shPairs  = input.bool(true, "نمایش 1-2 های باز (اهداف)", group = G4)
+bool   shClosed = input.bool(false, "نگه داشتن خطوط 1-2 بسته‌شده", group = G4)
+bool   shN3     = input.bool(true, "نمایش هدف تقارنی نود 3", group = G4)
+bool   shSym    = input.bool(true, "نمایش تقارن AB=CD", group = G4)
+bool   shHook   = input.bool(true, "نمایش هوک و سطح 86.4%", group = G4)
+bool   shFlag   = input.bool(true, "نمایش ستاپ 123Flag", group = G4)
+bool   shTable  = input.bool(true, "نمایش داشبورد", group = G4)
+string tPosIn   = input.string("بالا راست", "محل داشبورد", options = ["بالا راست", "بالا چپ", "پایین راست", "پایین چپ"], group = G4)
+string tSizeIn  = input.string("کوچک", "اندازه متن داشبورد", options = ["ریز", "کوچک", "معمولی"], group = G4)
+color  colH     = input.color(#ff5252, "رنگ سقف‌ها", group = G4)
+color  colL     = input.color(#00e676, "رنگ کف‌ها", group = G4)
+color  colHook  = input.color(#ff9800, "رنگ هوک / 86.4%", group = G4)
+color  colSym   = input.color(#b388ff, "رنگ تقارن", group = G4)
+
+// ---------------------------------------------------------------- Helpers
+bool isFa = langIn == "فارسی"
+tr(string fa, string en) => isFa ? fa : en
+fmt(float x) => na(x) ? "—" : str.tostring(x, format.mintick)
+
+float atr = ta.atr(14)
+float tol = eqTol * nz(atr, 0.0)
+
+// ---------------------------------------------------------------- Sequencing engine
+// One "side" for peaks (dir = +1) and one for troughs (dir = -1).
+// Values are normalised as v = dir * price, so on both sides "higher v" = further out.
+// st = stack of open sequences: [1] only, or [1,2] (an open 1-2 waiting for a 3).
+type Seq
+    float v1
+    int   b1
+    float v2
+    int   b2
+    line  ln
+    label lb
+
+type Side
+    array<Seq> st
+    int   dir
+    float last3
+    int   last3b
+
+var Side sH = Side.new(array.new<Seq>(), 1, na, na)
+var Side sL = Side.new(array.new<Seq>(), -1, na, na)
+
+nodeLabel(int b, int dir, string txt, color c, bool strong) =>
+    label.new(b, 0.0, txt, xloc = xloc.bar_index, yloc = dir == 1 ? yloc.abovebar : yloc.belowbar, color = strong ? c : color.new(c, 45), style = dir == 1 ? label.style_label_down : label.style_label_up, textcolor = color.white, size = strong ? size.normal : size.small)
+
+// Process a new node v at bar b on side s.
+// commit = false → simulation only (no drawing, state untouched).
+// Returns [number of open 1-2 closed by this node, code (1/2/3), extended(1/0)]
+processNode(Side s, float v, int b, bool commit, bool newOk) =>
+    array<Seq> st = commit ? s.st : array.copy(s.st)
+    int closed = 0
+    Seq cand = na
+    int i = array.size(st) - 1
+    while i >= 0
+        Seq q = array.get(st, i)
+        bool stop = false
+        if not na(q.v2)
+            // open 1-2: closed by a node beyond its 2  → this node is 3
+            if v > q.v2 + tol
+                closed += 1
+                if commit and not na(q.ln)
+                    if shClosed
+                        line.set_extend(q.ln, extend.none)
+                        line.set_x2(q.ln, b)
+                        line.set_style(q.ln, line.style_dashed)
+                    else
+                        line.delete(q.ln)
+                array.remove(st, i)
+            else
+                stop := true
+        else
+            // single 1: a node beyond it becomes 2 (outermost 1 wins)
+            if v > q.v1 + tol
+                cand := q
+                array.remove(st, i)
+            else
+                stop := true
+        if stop
+            break
+        i -= 1
+    bool ext = not na(cand)
+    int code = closed > 0 ? 3 : ext ? 2 : 1
+    if commit
+        color col = s.dir == 1 ? colH : colL
+        float price = s.dir * v
+        label newLb = na
+        if shNodes and closed > 0
+            newLb := nodeLabel(b, s.dir, ext ? "3/2" : "3", col, true)
+        else if shNodes and ext
+            nodeLabel(b, s.dir, "2", col, false)
+        if ext
+            if shNodes
+                if not na(cand.lb)
+                    label.set_text(cand.lb, "3/1")
+                else
+                    nodeLabel(cand.b1, s.dir, "1", col, false)
+            line ln = na
+            if shPairs
+                ln := line.new(b, price, b + 1, price, xloc = xloc.bar_index, extend = extend.right, color = color.new(col, 35), style = line.style_dotted, width = 1)
+            array.push(st, Seq.new(cand.v1, cand.b1, v, b, ln, na))
+        else if closed == 0 or newOk
+            // a node 3 starts a new sequence (3/1) only after an opposite node 3 / new cycle extreme
+            array.push(st, Seq.new(v, b, na, na, na, newLb))
+        if closed > 0
+            s.last3 := v
+            s.last3b := b
+        while array.size(st) > maxOpen
+            Seq o = array.shift(st)
+            if not na(o.ln)
+                line.delete(o.ln)
+    [closed, code, ext ? 1 : 0]
+
+// Nearest open 1-2 beyond current price, and the innermost open pair (price space)
+openInfo(Side s) =>
+    float best = na
+    float iv1 = na
+    float iv2 = na
+    int cnt = 0
+    int n = array.size(s.st)
+    if n > 0
+        for i = n - 1 to 0
+            Seq q = array.get(s.st, i)
+            if not na(q.v2)
+                cnt += 1
+                float lv = s.dir * q.v2
+                if na(iv2)
+                    iv1 := s.dir * q.v1
+                    iv2 := lv
+                bool beyond = s.dir == 1 ? lv > close : lv < close
+                if beyond and (na(best) or math.abs(lv - close) < math.abs(best - close))
+                    best := lv
+    [best, iv1, iv2, cnt]
+
+// ---------------------------------------------------------------- Zigzag of confirmed nodes
+// Last element is "tentative": it can be replaced by a more extreme node of the same type.
+// When an opposite node arrives, the previous one is committed to the sequencing engine.
+var array<float> zP = array.new<float>()
+var array<int>   zB = array.new<int>()
+var array<int>   zT = array.new<int>()
+var array<int>   zC = array.new<int>()   // committed sequence code of each node
+
+zzAdd(int t, float p, int b) =>
+    int n = array.size(zP)
+    int res = 0
+    if n == 0
+        array.push(zP, p)
+        array.push(zB, b)
+        array.push(zT, t)
+        array.push(zC, 0)
+        res := 1
+    else
+        int lt = array.get(zT, n - 1)
+        if lt == t
+            float lp = array.get(zP, n - 1)
+            if (t == 1 and p > lp) or (t == -1 and p < lp)
+                array.set(zP, n - 1, p)
+                array.set(zB, n - 1, b)
+                array.set(zC, n - 1, 0)
+                res := 2
+        else
+            array.push(zP, p)
+            array.push(zB, b)
+            array.push(zT, t)
+            array.push(zC, 0)
+            res := 3
+    res
+
+// node idx is the most extreme of its last 5 same-type nodes (start of a new cycle)
+isExtreme(int idx) =>
+    bool ext = true
+    int t = array.get(zT, idx)
+    float p = array.get(zP, idx)
+    for j = 1 to 4
+        int k = idx - 2 * j
+        if k >= 0 and ext
+            if not (t * p > t * array.get(zP, k))
+                ext := false
+    ext
+
+commitIdx(int idx) =>
+    int t = array.get(zT, idx)
+    float p = array.get(zP, idx)
+    int b = array.get(zB, idx)
+    bool newOk = true
+    if idx > 0
+        newOk := array.get(zC, idx - 1) == 3 or isExtreme(idx - 1)
+    [c, cd, ex] = processNode(t == 1 ? sH : sL, t * p, b, true, newOk)
+    array.set(zC, idx, cd)
+    c
+
+// Hook template on the last k zigzag nodes (k = 7..4). d = +1 positive hook, -1 negative.
+// Positive: T(low) → 1(high) → 1(low) → 2(high) → 2(low) → 3(high) → 3(low ≈ 86.4%)
+hookMatch(int d) =>
+    int n = array.size(zP)
+    int bestK = 0
+    bool bestB = false
+    float bestR = na
+    for j = 0 to 3
+        int k = 7 - j
+        if n >= k and bestK == 0
+            int s = n - k
+            if array.get(zT, s) == -d
+                float w0 = d * array.get(zP, s)
+                float w1 = d * array.get(zP, s + 1)
+                float w2 = d * array.get(zP, s + 2)
+                float w3 = d * array.get(zP, s + 3)
+                bool ok = w1 > w0 and w2 > w0 and w2 < w1 and w3 > w1 + tol
+                bool isB = false
+                float r = na
+                if ok and k >= 5
+                    float w4 = d * array.get(zP, s + 4)
+                    ok := w4 < w2 - tol and w4 > w0
+                    if ok and k >= 6
+                        float w5 = d * array.get(zP, s + 5)
+                        bool tA = w5 > w3 + tol
+                        bool tB = w5 <= w3 + tol and w5 > w4
+                        ok := tA or tB
+                        isB := tB
+                        if ok and k >= 7
+                            float w6 = d * array.get(zP, s + 6)
+                            float top = isB ? w3 : w5
+                            r := (top - w6) / (top - w0)
+                            ok := w6 < w4 - tol and (not enfZone or (r >= rMin and r <= rMax))
+                if ok
+                    bestK := k
+                    bestB := isB
+                    bestR := r
+    [bestK, bestB, bestR]
+
+// 123Flag on the last 8 nodes. d = +1: rising peaks 1<2<3 then Z then F > 3 → SHORT.
+// d = -1: falling troughs 1>2>3 then Z then F < 3 → LONG.
+flagMatch(int d) =>
+    int n = array.size(zP)
+    bool ok = false
+    if n >= 8
+        if array.get(zT, n - 1) == d
+            int s = n - 8
+            float w0 = d * array.get(zP, s)
+            float w1 = d * array.get(zP, s + 1)
+            float w2 = d * array.get(zP, s + 2)
+            float w3 = d * array.get(zP, s + 3)
+            float w4 = d * array.get(zP, s + 4)
+            float w5 = d * array.get(zP, s + 5)
+            float w7 = d * array.get(zP, s + 7)
+            ok := w1 + tol < w3 and w3 + tol < w5 and w2 > w0 and w4 > w0 and w7 > w5 + fExc * nz(atr, 0.0)
+    ok
+
+// Potential flag (live): 1<2<3 and Z already formed, price is now spiking beyond 3
+flagPotential(int d, float liveW) =>
+    int n = array.size(zP)
+    bool ok = false
+    if n >= 7
+        if array.get(zT, n - 1) == -d
+            int s = n - 7
+            float w0 = d * array.get(zP, s)
+            float w1 = d * array.get(zP, s + 1)
+            float w2 = d * array.get(zP, s + 2)
+            float w3 = d * array.get(zP, s + 3)
+            float w4 = d * array.get(zP, s + 4)
+            float w5 = d * array.get(zP, s + 5)
+            ok := w1 + tol < w3 and w3 + tol < w5 and w2 > w0 and w4 > w0 and liveW > w5 + fExc * nz(atr, 0.0)
+    ok
+
+// HTF bias from the sequence: last node 3 on peaks → bearish (-1); on troughs → bullish (+1)
+f_bias(int L) =>
+    var float h1 = na
+    var float h2 = na
+    var float l1 = na
+    var float l2 = na
+    var int bias = 0
+    float tolB = 0.05 * nz(ta.atr(14), 0.0)
+    float phh = ta.pivothigh(high, L, L)
+    float pll = ta.pivotlow(low, L, L)
+    if not na(phh)
+        if na(h1)
+            h1 := phh
+        else if na(h2)
+            if phh > h1 + tolB
+                h2 := phh
+            else
+                h1 := phh
+        else
+            if phh > h2 + tolB
+                bias := -1
+                h1 := phh
+                h2 := na
+            else if phh < h1
+                // a lower peak under an open 1-2 → a new, more recent sequence starts here
+                h1 := phh
+                h2 := na
+    if not na(pll)
+        if na(l1)
+            l1 := pll
+        else if na(l2)
+            if pll < l1 - tolB
+                l2 := pll
+            else
+                l1 := pll
+        else
+            if pll < l2 - tolB
+                bias := 1
+                l1 := pll
+                l2 := na
+            else if pll > l1
+                // a higher trough above an open 1-2 → a new, more recent sequence starts here
+                l1 := pll
+                l2 := na
+    // target = where the next node 3 must form (beyond the open node 2 on the opposite side)
+    float tgt = na
+    if bias == 1
+        tgt := h2
+    else if bias == -1
+        tgt := l2
+    [bias, tgt]
+
+// previous-bar value (no repaint when requesting a higher timeframe)
+f_biasPrev(int L) =>
+    [b, t] = f_bias(L)
+    [b[1], t[1]]
+
+// trend of any timeframe: higher TF → confirmed previous bar; same/lower TF → last value
+mtfBias(string tf, int L) =>
+    [bH, tH] = request.security(syminfo.tickerid, tf, f_biasPrev(L), lookahead = barmerge.lookahead_on)
+    [bLo, tLo] = request.security(syminfo.tickerid, tf, f_bias(L), lookahead = barmerge.lookahead_off)
+    bool higher = timeframe.in_seconds(tf) > timeframe.in_seconds(timeframe.period)
+    [higher ? nz(bH, 0) : nz(bLo, 0), higher ? tH : tLo]
+
+[htfRaw, htfTgt] = mtfBias(htfTf, htfLen)
+int htfBias = useHtf ? htfRaw : 0
+
+// ---------------------------------------------------------------- Main: feed confirmed nodes
+float ph = ta.pivothigh(high, pLen, pLen)
+float pl = ta.pivotlow(low, pLen, pLen)
+int   pb = bar_index - pLen
+
+bool changed = false
+int  ltBefore = 0
+if array.size(zT) > 0
+    ltBefore := array.last(zT)
+bool highFirst = ltBefore != 1
+for k = 0 to 1
+    bool isHighStep = (k == 0) == highFirst
+    float pv = isHighStep ? ph : pl
+    if not na(pv)
+        int r = zzAdd(isHighStep ? 1 : -1, pv, pb)
+        if r == 3
+            commitIdx(array.size(zP) - 2)
+        if r > 0
+            changed := true
+
+if array.size(zP) > 80
+    array.shift(zP)
+    array.shift(zB)
+    array.shift(zT)
+    array.shift(zC)
+
+// Extremes after the last node (live leg)
+int   zN    = array.size(zP)
+int   since = 1
+if zN > 0
+    since := math.max(bar_index - array.last(zB), 1)
+float hiS   = ta.highest(high, math.min(since, 1999))
+float loS   = ta.lowest(low, math.min(since, 1999))
+
+// ---------------------------------------------------------------- State for events / dashboard
+bool evH3 = false
+bool evL3 = false
+bool evBearFlag = false
+bool evBullFlag = false
+bool evHookPos = false
+bool evHookNeg = false
+bool evHHRup = false
+bool evHHRdn = false
+
+var int   lastT    = 0       // type of last node (+1 peak / -1 trough)
+var float lastP    = na
+var int   lastB    = na
+var int   lastCode = 0
+var int   lastExt  = 0
+var label tentLb   = na
+var int   lastEvBar = na
+
+// hook
+var int    hkD = 0
+var int    hkK = 0
+var bool   hkB = false
+var float  hkR = na
+var float  hkLvl = na
+var string hkTxt = ""
+var string hkNext = ""
+var line   hkLine = na
+var label  hkLbl = na
+var int    lastHookT0 = na
+
+// cycle
+var int   cyDir = 0
+var int   cyPhase = 0       // 0 none, 1 hook1, 2 rally (HHR), 3 flag → return, 4 closed
+var float cyR = na
+var float cyT = na
+var float firstHookT = na
+var int   lastHookDir = 0
+var int   lastHookEnd = na
+
+// flag
+var int   fSide = 0
+var float fEnt = na
+var float fSL = na
+var float fTP1 = na
+var float fTP2 = na
+var float fRR = na
+var int   fStat = 0         // 0 active, 1 TP1, 2 TP2, -1 SL, 3 TP1 then SL
+var int   fDetBar = na
+var int   lastFlagFbarUp = na
+var int   lastFlagFbarDn = na
+var array<line>  flagLines = array.new<line>()
+var array<label> flagLbls  = array.new<label>()
+
+// symmetry
+var line  symLn = na
+var label symLb = na
+var float symD = na
+var float leg864 = na
+
+if changed and zN > 0
+    lastT := array.get(zT, zN - 1)
+    lastP := array.get(zP, zN - 1)
+    lastB := array.get(zB, zN - 1)
+    [sc, scode, sext] = processNode(lastT == 1 ? sH : sL, lastT * lastP, lastB, false, false)
+    lastCode := scode
+    lastExt := sext
+    // tentative label for the newest node (becomes permanent once the next node forms)
+    label.delete(tentLb)
+    tentLb := na
+    if shNodes and scode >= 2
+        string tx = scode == 3 ? (sext == 1 ? "3/2" : "3") : "2"
+        tentLb := nodeLabel(lastB, lastT, tx, lastT == 1 ? colH : colL, scode == 3)
+        label.set_tooltip(tentLb, tr("نود موقت: تا تشکیل نود مخالف بعدی ممکن است جابجا شود", "Tentative node: may move until the next opposite node forms"))
+    if scode == 3 and (na(lastEvBar) or lastB != lastEvBar)
+        lastEvBar := lastB
+        if lastT == 1
+            evH3 := true
+        else
+            evL3 := true
+
+    // ----- symmetry AB = CD and 86.4% of current leg
+    if zN >= 3
+        float pA = array.get(zP, zN - 3)
+        float pB_ = array.get(zP, zN - 2)
+        float pC = array.get(zP, zN - 1)
+        int bA = array.get(zB, zN - 3)
+        int bB = array.get(zB, zN - 2)
+        int bC = array.get(zB, zN - 1)
+        symD := pC + (pB_ - pA)
+        leg864 := pC + lvl864 * (pB_ - pC)
+        line.delete(symLn)
+        label.delete(symLb)
+        if shSym
+            int bD = math.min(bC + math.max(bB - bA, 1), bar_index + 450)
+            symLn := line.new(bC, pC, bD, symD, xloc = xloc.bar_index, color = colSym, style = line.style_dashed, width = 1)
+            symLb := label.new(bD, symD, "AB=CD " + fmt(symD), xloc = xloc.bar_index, style = label.style_label_left, color = color.new(colSym, 75), textcolor = colSym, size = size.small)
+
+    // ----- hook stage
+    [kP, bP, rP] = hookMatch(1)
+    [kN, bN, rN] = hookMatch(-1)
+    hkD := kP >= kN ? 1 : -1
+    hkK := math.max(kP, kN)
+    hkB := hkD == 1 ? bP : bN
+    hkR := hkD == 1 ? rP : rN
+    hkLvl := na
+    hkTxt := ""
+    hkNext := ""
+    line.delete(hkLine)
+    label.delete(hkLbl)
+    if hkK >= 4
+        int s0 = zN - hkK
+        float p0 = array.get(zP, s0)
+        float p1 = array.get(zP, s0 + 1)
+        float p2 = array.get(zP, s0 + 2)
+        float p3 = array.get(zP, s0 + 3)
+        float p4 = na
+        float p5 = na
+        float p6 = na
+        if hkK >= 5
+            p4 := array.get(zP, s0 + 4)
+        if hkK >= 6
+            p5 := array.get(zP, s0 + 5)
+        if hkK >= 7
+            p6 := array.get(zP, s0 + 6)
+        int t0bar = array.get(zB, s0)
+        string hName = hkD == 1 ? tr("هوک مثبت", "Positive Hook") : tr("هوک منفی", "Negative Hook")
+        string pkW = hkD == 1 ? tr("قله", "peak") : tr("دره", "trough")
+        string trW = hkD == 1 ? tr("دره", "trough") : tr("قله", "peak")
+        string outW = hkD == 1 ? tr("بالای", "above") : tr("زیر", "below")
+        string inW = hkD == 1 ? tr("زیر", "below") : tr("بالای", "above")
+        string revW = hkD == 1 ? tr("صعودی ↑", "bullish ↑") : tr("نزولی ↓", "bearish ↓")
+        string typ = hkK >= 6 ? (hkB ? " B" : " A") : ""
+        hkTxt := hName + typ + tr(" — مرحله ", " — stage ") + str.tostring(hkK - 1) + "/6"
+        if hkK == 4
+            hkNext := tr("انتظار: ", "Next: ") + trW + " 2 " + inW + " " + fmt(p2)
+        else if hkK == 5
+            hkNext := tr("انتظار: ", "Next: ") + pkW + " 3 " + outW + " " + fmt(p3) + tr(" | تقارن نودها ≈ ", " | node symmetry ≈ ") + fmt(p3 + (p3 - p1))
+        else if hkK == 6
+            float top = hkB ? p3 : p5
+            hkLvl := top - lvl864 * (top - p0)
+            hkNext := tr("انتظار: ", "Next: ") + trW + tr(" 3 نزدیک 86.4% = ", " 3 near 86.4% = ") + fmt(hkLvl) + tr(" (تقارن ≈ ", " (symmetry ≈ ") + fmt(2 * p4 - p2) + tr(") سپس برگشت ", ") then reversal ") + revW
+        else
+            float top = hkB ? p3 : p5
+            hkLvl := top - lvl864 * (top - p0)
+            hkNext := tr("هوک بسته شد (بازگشت ", "Hook closed (retrace ") + str.tostring(hkR * 100, "#.#") + tr("%) → انتظار حرکت ", "%) → expect ") + revW
+        if shHook and hkK >= 6
+            hkLine := line.new(t0bar, hkLvl, bar_index + 10, hkLvl, xloc = xloc.bar_index, color = colHook, style = line.style_dashed, width = 1)
+            hkLbl := label.new(bar_index + 10, hkLvl, hName + typ + " 86.4% " + fmt(hkLvl), xloc = xloc.bar_index, style = label.style_label_left, color = color.new(colHook, 80), textcolor = colHook, size = size.small)
+        // ----- hook completed → Hook-Hook-Rally / cycle tracking
+        if hkK == 7 and (na(lastHookT0) or t0bar != lastHookT0)
+            lastHookT0 := t0bar
+            int endBar = array.get(zB, s0 + 6)
+            if shHook
+                label.new(endBar, p6, (hkD == 1 ? "Hook+" : "Hook−") + typ, xloc = xloc.bar_index, yloc = hkD == 1 ? yloc.belowbar : yloc.abovebar, style = hkD == 1 ? label.style_label_up : label.style_label_down, color = color.new(colHook, 20), textcolor = color.black, size = size.small)
+            if hkD == 1
+                evHookPos := true
+            else
+                evHookNeg := true
+            if lastHookDir == hkD and not na(lastHookEnd) and t0bar >= lastHookEnd
+                cyPhase := 2
+                cyDir := hkD
+                cyR := firstHookT
+                cyT := na
+                if hkD == 1
+                    evHHRup := true
+                else
+                    evHHRdn := true
+                if shHook
+                    label.new(endBar, p6, "Hook-Hook-Rally " + (hkD == 1 ? "↑" : "↓"), xloc = xloc.bar_index, yloc = hkD == 1 ? yloc.belowbar : yloc.abovebar, style = label.style_none, textcolor = colHook, size = size.normal)
+            else
+                cyPhase := 1
+                cyDir := hkD
+                firstHookT := p0
+                cyR := p0
+                cyT := na
+            lastHookDir := hkD
+            lastHookEnd := endBar
+
+    // ----- 123Flag
+    for j = 0 to 1
+        int d = j == 0 ? 1 : -1
+        if flagMatch(d)
+            int fb = array.get(zB, zN - 1)
+            bool isNew = d == 1 ? (na(lastFlagFbarUp) or fb != lastFlagFbarUp) : (na(lastFlagFbarDn) or fb != lastFlagFbarDn)
+            if isNew
+                if d == 1
+                    lastFlagFbarUp := fb
+                else
+                    lastFlagFbarDn := fb
+                float F = array.get(zP, zN - 1)
+                float Z = array.get(zP, zN - 2)
+                float R0 = array.get(zP, zN - 8)
+                fSide := -d
+                fEnt := close
+                fSL := F + d * slBuf * nz(atr, 0.0)
+                fTP1 := Z
+                fTP2 := F - lvl864 * (F - R0)
+                fRR := math.abs(fSL - fEnt) > 0 ? math.abs(fTP2 - fEnt) / math.abs(fSL - fEnt) : na
+                fStat := 0
+                fDetBar := bar_index
+                if d == 1
+                    evBearFlag := true
+                else
+                    evBullFlag := true
+                if shFlag
+                    color fc = d == 1 ? colH : colL
+                    array.push(flagLbls, label.new(fb, F, (d == 1 ? "F ▼ Short" : "F ▲ Long"), xloc = xloc.bar_index, yloc = d == 1 ? yloc.abovebar : yloc.belowbar, style = d == 1 ? label.style_label_down : label.style_label_up, color = fc, textcolor = color.white, size = size.normal, tooltip = "Entry ≈ " + fmt(fEnt) + "\nSL " + fmt(fSL) + "\nTP1 (Z) " + fmt(fTP1) + "\nTP2 (T 86.4%) " + fmt(fTP2)))
+                    array.push(flagLines, line.new(fb, fSL, bar_index + 20, fSL, xloc = xloc.bar_index, color = color.red, style = line.style_solid, width = 1))
+                    array.push(flagLines, line.new(fb, fTP1, bar_index + 20, fTP1, xloc = xloc.bar_index, color = color.teal, style = line.style_dashed, width = 1))
+                    array.push(flagLines, line.new(fb, fTP2, bar_index + 20, fTP2, xloc = xloc.bar_index, color = color.lime, style = line.style_solid, width = 2))
+                    array.push(flagLbls, label.new(bar_index + 20, fSL, "SL " + fmt(fSL), xloc = xloc.bar_index, style = label.style_label_left, color = color.new(color.red, 80), textcolor = color.red, size = size.tiny))
+                    array.push(flagLbls, label.new(bar_index + 20, fTP1, "TP1 (Z) " + fmt(fTP1), xloc = xloc.bar_index, style = label.style_label_left, color = color.new(color.teal, 80), textcolor = color.teal, size = size.tiny))
+                    array.push(flagLbls, label.new(bar_index + 20, fTP2, "TP2 (T) " + fmt(fTP2), xloc = xloc.bar_index, style = label.style_label_left, color = color.new(color.lime, 80), textcolor = color.lime, size = size.tiny))
+                    while array.size(flagLines) > 15
+                        line.delete(array.shift(flagLines))
+                    while array.size(flagLbls) > 15
+                        label.delete(array.shift(flagLbls))
+                // cycle: flag against the rally → return phase towards T (86.4% of R→F)
+                if cyPhase == 2 and cyDir == d and not na(cyR)
+                    cyPhase := 3
+                    cyT := F - lvl864 * (F - cyR)
+
+// ---------------------------------------------------------------- Flag status & cycle close
+if fSide != 0 and bar_index > nz(fDetBar, bar_index) and (fStat == 0 or fStat == 1)
+    bool slHit = fSide == -1 ? high >= fSL : low <= fSL
+    bool t1Hit = fSide == -1 ? low <= fTP1 : high >= fTP1
+    bool t2Hit = fSide == -1 ? low <= fTP2 : high >= fTP2
+    if fStat == 0
+        if slHit
+            fStat := -1
+        else if t2Hit
+            fStat := 2
+        else if t1Hit
+            fStat := 1
+    else
+        if t2Hit
+            fStat := 2
+        else if slHit
+            fStat := 3
+
+if cyPhase == 3 and not na(cyT)
+    if (cyDir == 1 and low <= cyT) or (cyDir == -1 and high >= cyT)
+        cyPhase := 4
+
+// ---------------------------------------------------------------- Dashboard
+[upLvl, hi1, hi2, hiCnt] = openInfo(sH)
+[dnLvl, lo1, lo2, loCnt] = openInfo(sL)
+
+var line  n3HLine = na
+var line  n3LLine = na
+var label n3HLb = na
+var label n3LLb = na
+
+posOf(string s) => s == "بالا راست" ? position.top_right : s == "بالا چپ" ? position.top_left : s == "پایین راست" ? position.bottom_right : position.bottom_left
+sizeOf(string s) => s == "ریز" ? size.tiny : s == "معمولی" ? size.normal : size.small
+var table tb = table.new(posOf(tPosIn), 2, 16, bgcolor = color.new(#131722, 8), frame_color = color.new(color.gray, 60), frame_width = 1, border_color = color.new(color.gray, 85), border_width = 1)
+
+dirTxt(int d) => d == 1 ? tr("صعودی ↑", "Bullish ↑") : d == -1 ? tr("نزولی ↓", "Bearish ↓") : tr("نامشخص", "Undefined")
+dirCol(int d) => d == 1 ? colL : d == -1 ? colH : color.gray
+
+row(int r, string k, string v, color vc) =>
+    table.cell(tb, 0, r, k, text_color = color.silver, text_size = sizeOf(tSizeIn), text_halign = text.align_left)
+    table.cell(tb, 1, r, v, text_color = vc, text_size = sizeOf(tSizeIn), text_halign = text.align_left)
+
+if barstate.islast
+    // node-3 symmetry targets for the innermost open pairs (2→3 ≈ 1→2)
+    float n3H = na(hi2) ? na : hi2 + (hi2 - hi1)
+    float n3L = na(lo2) ? na : lo2 - (lo1 - lo2)
+    line.delete(n3HLine)
+    line.delete(n3LLine)
+    label.delete(n3HLb)
+    label.delete(n3LLb)
+    if shN3
+        if not na(n3H)
+            n3HLine := line.new(bar_index, n3H, bar_index + 12, n3H, xloc = xloc.bar_index, color = colH, style = line.style_dotted, width = 2)
+            n3HLb := label.new(bar_index + 12, n3H, tr("نود 3 سقف ≈ ", "Peak node 3 ≈ ") + fmt(n3H), xloc = xloc.bar_index, style = label.style_label_left, color = color.new(colH, 85), textcolor = colH, size = size.small)
+        if not na(n3L)
+            n3LLine := line.new(bar_index, n3L, bar_index + 12, n3L, xloc = xloc.bar_index, color = colL, style = line.style_dotted, width = 2)
+            n3LLb := label.new(bar_index + 12, n3L, tr("نود 3 کف ≈ ", "Trough node 3 ≈ ") + fmt(n3L), xloc = xloc.bar_index, style = label.style_label_left, color = color.new(colL, 85), textcolor = colL, size = size.small)
+
+    // ----- where are we / where next
+    string lastTxt = "—"
+    string mvTxt = "—"
+    string thenTxt = ""
+    float  mvTgt = na
+    int    mvDir = 0
+    if lastT == 1
+        string cTxt = lastCode == 3 ? tr("نود 3 (بستن 1-2 باز)", "node 3 (closes open 1-2)") : lastCode == 2 ? tr("نود 2", "node 2") : tr("بدون شماره / شروع سکانس", "unnumbered / new sequence")
+        lastTxt := tr("قله ", "Peak ") + fmt(lastP) + " — " + cTxt
+        if hiS > lastP + tol
+            [c2, code2, e2] = processNode(sH, hiS, bar_index, false, false)
+            mvDir := 1
+            mvTxt := code2 == 3 ? tr("↑ صعود – در حال بستن 1-2 باز (تشکیل نود 3 سقف)", "↑ Rising – closing an open 1-2 (peak node 3 forming)") : tr("↑ صعود ادامه دارد (سقف جدید در حال شکل‌گیری)", "↑ Still rising (new peak forming)")
+            thenTxt := code2 == 3 ? tr("بعد از نود 3: انتظار برگشت نزولی و 123Flag فروش", "After node 3: expect reversal down / short 123Flag") : ""
+            mvTgt := upLvl
+        else
+            mvDir := -1
+            if lastCode == 3
+                mvTxt := tr("↓ نزولی – برگشت پس از نود 3 سقف (سکانس)", "↓ Bearish – reversal after peak node 3")
+                thenTxt := tr("هدف: 1-2 های باز پایین، سپس 86.4% لگ", "Target: open 1-2 below, then 86.4% of leg")
+            else if lastCode == 2
+                mvTxt := tr("↓ اصلاح نزولی تا دره بعدی", "↓ Pullback down to next trough")
+                thenTxt := tr("سپس ↑ برای تشکیل نود 3 بالای ", "Then ↑ to form node 3 above ") + fmt(hi2) + tr(" (تقارن ≈ ", " (symmetry ≈ ") + fmt(n3H) + ")"
+            else
+                mvTxt := tr("↓ نزولی تا دره بعدی", "↓ Down to next trough")
+            mvTgt := na(dnLvl) ? leg864 : dnLvl
+    else if lastT == -1
+        string cTxt = lastCode == 3 ? tr("نود 3 (بستن 1-2 باز)", "node 3 (closes open 1-2)") : lastCode == 2 ? tr("نود 2", "node 2") : tr("بدون شماره / شروع سکانس", "unnumbered / new sequence")
+        lastTxt := tr("دره ", "Trough ") + fmt(lastP) + " — " + cTxt
+        if loS < lastP - tol
+            [c2, code2, e2] = processNode(sL, -loS, bar_index, false, false)
+            mvDir := -1
+            mvTxt := code2 == 3 ? tr("↓ نزول – در حال بستن 1-2 باز (تشکیل نود 3 کف)", "↓ Falling – closing an open 1-2 (trough node 3 forming)") : tr("↓ نزول ادامه دارد (کف جدید در حال شکل‌گیری)", "↓ Still falling (new trough forming)")
+            thenTxt := code2 == 3 ? tr("بعد از نود 3: انتظار برگشت صعودی و 123Flag خرید", "After node 3: expect reversal up / long 123Flag") : ""
+            mvTgt := dnLvl
+        else
+            mvDir := 1
+            if lastCode == 3
+                mvTxt := tr("↑ صعودی – برگشت پس از نود 3 کف (سکانس)", "↑ Bullish – reversal after trough node 3")
+                thenTxt := tr("هدف: 1-2 های باز بالا، سپس 86.4% لگ", "Target: open 1-2 above, then 86.4% of leg")
+            else if lastCode == 2
+                mvTxt := tr("↑ اصلاح صعودی تا قله بعدی", "↑ Pullback up to next peak")
+                thenTxt := tr("سپس ↓ برای تشکیل نود 3 زیر ", "Then ↓ to form node 3 below ") + fmt(lo2) + tr(" (تقارن ≈ ", " (symmetry ≈ ") + fmt(n3L) + ")"
+            else
+                mvTxt := tr("↑ صعودی تا قله بعدی", "↑ Up to next peak")
+            mvTgt := na(upLvl) ? leg864 : upLvl
+
+    // ----- cycle phase
+    string cyTxt = cyPhase == 0 ? tr("در انتظار هوک اول", "Waiting for first hook") : cyPhase == 1 ? tr("هوک اول تکمیل – انتظار هوک دوم", "Hook 1 done – waiting for Hook 2") : cyPhase == 2 ? tr("هوک-هوک-رالی: فاز رالی ", "Hook-Hook-Rally: rally phase ") + dirTxt(cyDir) : cyPhase == 3 ? tr("فلگ تشکیل شد – فاز برگشت تا T = ", "Flag formed – return phase to T = ") + fmt(cyT) : tr("سایکل بسته شد (رسیدن به T)", "Cycle closed (T reached)")
+
+    // ----- flag
+    string fTxt = tr("ستاپ فعالی نیست", "No setup")
+    string fLv = ""
+    color fCol = color.gray
+    bool potS = flagPotential(1, hiS)
+    bool potL = flagPotential(-1, -loS)
+    if fSide != 0
+        string st = fStat == 0 ? tr("فعال", "active") : fStat == 1 ? tr("TP1 خورد", "TP1 hit") : fStat == 2 ? tr("TP2 خورد ✓", "TP2 hit ✓") : fStat == -1 ? tr("حدضرر خورد ✗", "Stopped ✗") : tr("TP1 سپس حدضرر", "TP1 then SL")
+        fTxt := (fSide == -1 ? "SHORT" : "LONG") + " — " + st + tr(" | هم‌جهت HTF: ", " | with HTF: ") + (htfBias == 0 ? "?" : htfBias == fSide ? "✔" : "✘")
+        fLv := "E " + fmt(fEnt) + " | SL " + fmt(fSL) + " | TP1 " + fmt(fTP1) + " | TP2 " + fmt(fTP2) + " | R/R " + str.tostring(fRR, "#.#")
+        fCol := fSide == -1 ? colH : colL
+    if potS or potL
+        fTxt := fTxt + tr("  ⚠ فلگ احتمالی ", "  ⚠ potential flag ") + (potS ? "SHORT" : "LONG") + tr(" در حال شکل‌گیری", " forming")
+
+    // ----- guidance (checklist of the PDF)
+    string guide = htfBias == 0 ? tr("روند HTF نامشخص؛ فقط سوپر‌اسکالپ با تأییدیه‌ها", "HTF trend unclear; super-scalp only with confirmations") : tr("روند HTF ", "HTF trend ") + dirTxt(htfBias) + tr("؛ در این تایم فقط 123Flag ", "; take only ") + (htfBias == 1 ? "LONG" : "SHORT") + tr(" بگیرید", " 123Flags here")
+    string align = mvDir == 0 or htfBias == 0 ? "" : (mvDir == htfBias ? tr("  (هم‌جهت با HTF ✔)", "  (with HTF ✔)") : tr("  (خلاف HTF – احتیاط)", "  (against HTF – caution)"))
+
+    if shTable
+        table.cell(tb, 0, 0, "NDS", text_color = color.white, bgcolor = color.new(#2962ff, 20), text_size = sizeOf(tSizeIn))
+        table.cell(tb, 1, 0, syminfo.ticker + " · " + timeframe.period + tr(" · پیوت ", " · pivot ") + str.tostring(pLen), text_color = color.white, bgcolor = color.new(#2962ff, 20), text_size = sizeOf(tSizeIn))
+        row(1, tr("روند تایم‌فریم بالا", "HTF trend") + " (" + htfTf + ")", useHtf ? dirTxt(htfBias) : tr("خاموش", "off"), dirCol(htfBias))
+        row(2, tr("آخرین نود", "Last node"), lastTxt, lastT == 1 ? colH : colL)
+        row(3, tr("حرکت محتمل بعدی", "Likely next move"), mvTxt + align, dirCol(mvDir))
+        row(4, tr("سپس", "Then"), thenTxt == "" ? "—" : thenTxt, color.silver)
+        row(5, tr("هدف نزدیک", "Nearest target"), fmt(mvTgt), dirCol(mvDir))
+        row(6, tr("الگوی هوک", "Hook pattern"), hkK >= 4 ? hkTxt : tr("هوکی در حال شکل‌گیری نیست", "No hook forming"), hkK >= 4 ? colHook : color.gray)
+        row(7, tr("انتظار هوک", "Hook expectation"), hkK >= 4 ? hkNext : "—", colHook)
+        row(8, tr("فاز سایکل", "Cycle phase"), cyTxt, dirCol(cyDir))
+        row(9, "123Flag", fTxt, fCol)
+        row(10, tr("سطوح ستاپ", "Setup levels"), fLv == "" ? "—" : fLv, fCol)
+        row(11, tr("1-2 باز بالا (هدف نود 3)", "Open 1-2 above"), fmt(upLvl) + "  [" + str.tostring(hiCnt) + "]", colH)
+        row(12, tr("1-2 باز پایین (هدف نود 3)", "Open 1-2 below"), fmt(dnLvl) + "  [" + str.tostring(loCnt) + "]", colL)
+        row(13, tr("تقارن AB=CD", "Symmetry AB=CD"), fmt(symD), colSym)
+        row(14, tr("86.4% لگ جاری", "86.4% of current leg"), fmt(leg864), colHook)
+        row(15, tr("راهنما (چک‌لیست)", "Guidance"), guide, color.white)
+
+// ---------------------------------------------------------------- Multi-timeframe trend panel
+[mb1, mt1] = mtfBias(mtf1, mtfLen)
+[mb2, mt2] = mtfBias(mtf2, mtfLen)
+[mb3, mt3] = mtfBias(mtf3, mtfLen)
+[mb4, mt4] = mtfBias(mtf4, mtfLen)
+[mb5, mt5] = mtfBias(mtf5, mtfLen)
+[mb6, mt6] = mtfBias(mtf6, mtfLen)
+[mb7, mt7] = mtfBias(mtf7, mtfLen)
+[chB, chT] = f_bias(mtfLen)     // trend of the timeframe on screen
+
+bgcolor(bgTrend and chB == 1 ? color.new(colL, 93) : bgTrend and chB == -1 ? color.new(colH, 93) : na, title = "NDS trend background")
+
+tfName(string tf) =>
+    int sec = timeframe.in_seconds(tf)
+    sec < 60 ? str.tostring(sec) + "s" : sec < 3600 ? str.tostring(sec / 60, "#") + "m" : sec < 86400 ? str.tostring(sec / 3600, "#") + "H" : tf
+
+var table mt = table.new(posOf(mPosIn), 3, 10, bgcolor = color.new(#131722, 8), frame_color = color.new(color.gray, 60), frame_width = 1, border_color = color.new(color.gray, 85), border_width = 1)
+
+mRow(int r, string tf, int b, float t) =>
+    bool cur = timeframe.in_seconds(tf) == timeframe.in_seconds(timeframe.period)
+    color bg = b == 1 ? color.new(colL, 25) : b == -1 ? color.new(colH, 25) : color.new(color.gray, 60)
+    string tgtTxt = fmt(t)
+    table.cell(mt, 0, r, (cur ? "▶ " : "") + tfName(tf), text_color = color.white, text_size = sizeOf(tSizeIn), bgcolor = cur ? color.new(#2962ff, 30) : na)
+    table.cell(mt, 1, r, dirTxt(b), text_color = color.white, bgcolor = bg, text_size = sizeOf(tSizeIn))
+    table.cell(mt, 2, r, tgtTxt, text_color = color.silver, text_size = sizeOf(tSizeIn), text_halign = text.align_right)
+
+if barstate.islast and shMtf
+    table.cell(mt, 0, 0, tr("تایم‌فریم", "TF"), text_color = color.white, bgcolor = color.new(#2962ff, 20), text_size = sizeOf(tSizeIn))
+    table.cell(mt, 1, 0, tr("روند NDS", "NDS trend"), text_color = color.white, bgcolor = color.new(#2962ff, 20), text_size = sizeOf(tSizeIn))
+    table.cell(mt, 2, 0, tr("سطح نود 3 بعدی", "Next node-3 level"), text_color = color.white, bgcolor = color.new(#2962ff, 20), text_size = sizeOf(tSizeIn))
+    mRow(1, mtf1, mb1, mt1)
+    mRow(2, mtf2, mb2, mt2)
+    mRow(3, mtf3, mb3, mt3)
+    mRow(4, mtf4, mb4, mt4)
+    mRow(5, mtf5, mb5, mt5)
+    mRow(6, mtf6, mb6, mt6)
+    mRow(7, mtf7, mb7, mt7)
+    int up = (mb1 == 1 ? 1 : 0) + (mb2 == 1 ? 1 : 0) + (mb3 == 1 ? 1 : 0) + (mb4 == 1 ? 1 : 0) + (mb5 == 1 ? 1 : 0) + (mb6 == 1 ? 1 : 0) + (mb7 == 1 ? 1 : 0)
+    int dn = (mb1 == -1 ? 1 : 0) + (mb2 == -1 ? 1 : 0) + (mb3 == -1 ? 1 : 0) + (mb4 == -1 ? 1 : 0) + (mb5 == -1 ? 1 : 0) + (mb6 == -1 ? 1 : 0) + (mb7 == -1 ? 1 : 0)
+    int cons = up > dn ? 1 : dn > up ? -1 : 0
+    table.cell(mt, 0, 8, tr("این چارت", "This chart"), text_color = color.white, text_size = sizeOf(tSizeIn), bgcolor = color.new(#2962ff, 30))
+    table.cell(mt, 1, 8, dirTxt(chB), text_color = color.white, bgcolor = chB == 1 ? color.new(colL, 25) : chB == -1 ? color.new(colH, 25) : color.new(color.gray, 60), text_size = sizeOf(tSizeIn))
+    table.cell(mt, 2, 8, fmt(chT), text_color = color.silver, text_size = sizeOf(tSizeIn), text_halign = text.align_left)
+    table.cell(mt, 0, 9, tr("جمع‌بندی", "Consensus"), text_color = color.white, text_size = sizeOf(tSizeIn))
+    table.cell(mt, 1, 9, dirTxt(cons), text_color = color.white, bgcolor = cons == 1 ? color.new(colL, 40) : cons == -1 ? color.new(colH, 40) : color.new(color.gray, 60), text_size = sizeOf(tSizeIn))
+    table.cell(mt, 2, 9, "↑ " + str.tostring(up) + "  ↓ " + str.tostring(dn), text_color = color.silver, text_size = sizeOf(tSizeIn))
+
+
+// ---------------------------------------------------------------- Entry planner: "wait for a good price"
+// Direction from 15m + 4H (NDS sequence), then wait for price to reach the NDS value zone
+// (open 1-2 / node-3 symmetry / hook 86.4% / 86.4% of the leg), then trigger on a 123Flag or node 3 in the zone.
+string G6 = "۶) برنامه ورود خوش‌قیمت / Entry planner"
+bool   shPlan   = input.bool(true, "نمایش پنل «صبر کن / وارد شو»", group = G6)
+string dirTfA   = input.timeframe("15", "تایم‌فریم جهت اصلی", group = G6)
+string dirTfB   = input.timeframe("240", "تایم‌فریم جهت بزرگ", group = G6)
+bool   needBoth = input.bool(true, "هر دو تایم‌فریم باید هم‌جهت باشند", group = G6)
+float  zoneW    = input.float(0.6, "حداقل پهنای ناحیه (×ATR)", minval = 0.1, step = 0.1, group = G6)
+int    zoneMem  = input.int(40, "اعتبار لمس ناحیه (تعداد کندل)", minval = 5, maxval = 500, group = G6)
+bool   trigN3   = input.bool(true, "ماشه ورود با نود 3 هم (علاوه بر 123Flag)", group = G6)
+string pPosIn   = input.string("پایین چپ", "محل پنل ترید", options = ["بالا راست", "بالا چپ", "پایین راست", "پایین چپ"], group = G6)
+
+[dA, tgA] = mtfBias(dirTfA, mtfLen)
+[dB, tgB] = mtfBias(dirTfB, mtfLen)
+int planDir = needBoth ? (dA == dB ? dA : 0) : dA
+
+// candidate value levels on the side we want to enter (below price for buys, above for sells)
+float n3Lb = na(lo2) ? na : lo2 - (lo1 - lo2)
+float n3Hb = na(hi2) ? na : hi2 + (hi2 - hi1)
+float cTop = na
+float cBot = na
+if planDir == 1
+    for lv in array.from(dnLvl, n3Lb, (hkD == 1 and hkK == 6) ? hkLvl : na, lastT == 1 ? leg864 : na)
+        if not na(lv) and lv < close
+            cTop := na(cTop) ? lv : math.max(cTop, lv)
+            cBot := na(cBot) ? lv : math.min(cBot, lv)
+else if planDir == -1
+    for lv in array.from(upLvl, n3Hb, (hkD == -1 and hkK == 6) ? hkLvl : na, lastT == -1 ? leg864 : na)
+        if not na(lv) and lv > close
+            cTop := na(cTop) ? lv : math.max(cTop, lv)
+            cBot := na(cBot) ? lv : math.min(cBot, lv)
+if not na(cTop) and cTop - cBot < zoneW * nz(atr, 0.0)
+    if planDir == 1
+        cBot := cTop - zoneW * nz(atr, 0.0)
+    else
+        cTop := cBot + zoneW * nz(atr, 0.0)
+
+// zone state: recomputed until price touches it, then frozen for zoneMem bars
+var float zTop = na
+var float zBot = na
+var int   zDir = 0
+var int   zTouch = na
+bool frozen = not na(zTouch) and bar_index - zTouch <= zoneMem and zDir == planDir
+if not frozen
+    zTop := cTop
+    zBot := cBot
+    zDir := planDir
+    zTouch := na
+bool inZone = not na(zTop) and high >= zBot and low <= zTop
+if inZone and zDir != 0 and na(zTouch)
+    zTouch := bar_index
+// zone broken by more than 1 ATR → invalid, recompute next bar
+if not na(zTop) and ((zDir == 1 and close < zBot - nz(atr, 0.0)) or (zDir == -1 and close > zTop + nz(atr, 0.0)))
+    zTouch := na
+bool touchedRecent = not na(zTouch) and bar_index - zTouch <= zoneMem
+
+bool trigLong  = zDir == 1 and touchedRecent and (evBullFlag or (trigN3 and evL3))
+bool trigShort = zDir == -1 and touchedRecent and (evBearFlag or (trigN3 and evH3))
+bool evZoneIn  = inZone and not inZone[1] and zDir != 0
+
+// stop / target for planner entries
+var float pSL = na
+var float pTP = na
+var int   pSide = 0
+var int   pBar = na
+if trigLong
+    pSide := 1
+    pBar := bar_index
+    pSL := evBullFlag ? fSL : (na(lastP) ? low : lastP) - slBuf * nz(atr, 0.0)
+    pTP := not na(upLvl) ? upLvl : not na(tgA) and tgA > close ? tgA : close + 2 * (close - pSL)
+if trigShort
+    pSide := -1
+    pBar := bar_index
+    pSL := evBearFlag ? fSL : (na(lastP) ? high : lastP) + slBuf * nz(atr, 0.0)
+    pTP := not na(dnLvl) ? dnLvl : not na(tgA) and tgA < close ? tgA : close - 2 * (pSL - close)
+
+if (trigLong or trigShort) and shPlan
+    label.new(bar_index, trigLong ? low : high, trigLong ? tr("ورود خرید ▲", "BUY ▲") : tr("ورود فروش ▼", "SELL ▼"), xloc = xloc.bar_index, yloc = trigLong ? yloc.belowbar : yloc.abovebar, style = trigLong ? label.style_label_up : label.style_label_down, color = trigLong ? color.new(colL, 0) : color.new(colH, 0), textcolor = color.black, size = size.normal, tooltip = "SL " + fmt(pSL) + "\nTP " + fmt(pTP))
+
+var box   zBox = na
+var table pt = table.new(posOf(pPosIn), 2, 8, bgcolor = color.new(#0b0f19, 5), frame_color = color.new(#2962ff, 40), frame_width = 2, border_color = color.new(color.gray, 85), border_width = 1)
+
+if barstate.islast and shPlan
+    box.delete(zBox)
+    zBox := na
+    if not na(zTop) and zDir != 0
+        color zc = zDir == 1 ? colL : colH
+        zBox := box.new(bar_index - 40, zTop, bar_index + 15, zBot, xloc = xloc.bar_index, border_color = color.new(zc, 30), bgcolor = color.new(zc, 82), text = zDir == 1 ? tr("ناحیه خرید خوش‌قیمت", "BUY value zone") : tr("ناحیه فروش خوش‌قیمت", "SELL value zone"), text_color = zc, text_size = size.small)
+    float dist = na(zTop) ? na : zDir == 1 ? (close - zTop) / close * 100 : (zBot - close) / close * 100
+    bool recentSig = pSide != 0 and not na(pBar) and bar_index - pBar <= 3
+    string dec = ""
+    color decC = color.gray
+    if planDir == 0
+        dec := tr("⏸ صبر کن — جهت ", "⏸ WAIT — ") + tfName(dirTfA) + tr(" و ", " and ") + tfName(dirTfB) + tr(" یکی نیست", " disagree")
+        decC := color.gray
+    else if recentSig
+        dec := (pSide == 1 ? tr("✅ وارد شو: خرید", "✅ ENTER: BUY") : tr("✅ وارد شو: فروش", "✅ ENTER: SELL"))
+        decC := pSide == 1 ? colL : colH
+    else if na(zTop)
+        dec := tr("⏳ جهت ", "⏳ Direction ") + dirTxt(planDir) + tr(" — ناحیه خوش‌قیمت هنوز شکل نگرفته", " — value zone not formed yet")
+        decC := color.silver
+    else if touchedRecent
+        dec := tr("🎯 در ناحیه خوش‌قیمت — منتظر ", "🎯 In value zone — wait for ") + (zDir == 1 ? tr("123Flag خرید / نود 3 کف", "long 123Flag / trough node 3") : tr("123Flag فروش / نود 3 سقف", "short 123Flag / peak node 3"))
+        decC := color.yellow
+    else
+        dec := tr("⏳ صبر کن تا قیمت به ناحیه ", "⏳ WAIT for price to reach the ") + (zDir == 1 ? tr("خرید", "buy") : tr("فروش", "sell")) + tr(" برسد", " zone")
+        decC := color.orange
+    bool against = (fSide != 0 and not na(fDetBar) and bar_index - fDetBar <= 3 and fSide == -planDir)
+    if against
+        dec := dec + tr("  |  ⚠ سیگنال خلاف جهت: وارد نشو", "  |  ⚠ counter-trend signal: skip")
+    table.cell(pt, 0, 0, tr("پنل ترید NDS", "NDS trade panel"), text_color = color.white, bgcolor = color.new(#2962ff, 20), text_size = sizeOf(tSizeIn))
+    table.cell(pt, 1, 0, syminfo.ticker + " · " + timeframe.period, text_color = color.white, bgcolor = color.new(#2962ff, 20), text_size = sizeOf(tSizeIn))
+    table.cell(pt, 0, 1, tr("جهت ", "Trend ") + tfName(dirTfA) + " / " + tfName(dirTfB), text_color = color.silver, text_size = sizeOf(tSizeIn))
+    table.cell(pt, 1, 1, dirTxt(dA) + "  |  " + dirTxt(dB), text_color = dA == dB ? dirCol(dA) : color.silver, text_size = sizeOf(tSizeIn))
+    table.cell(pt, 0, 2, tr("تصمیم", "Decision"), text_color = color.silver, text_size = sizeOf(tSizeIn))
+    table.cell(pt, 1, 2, dec, text_color = color.black, bgcolor = decC, text_size = size.normal)
+    table.cell(pt, 0, 3, tr("ناحیه خوش‌قیمت", "Value zone"), text_color = color.silver, text_size = sizeOf(tSizeIn))
+    table.cell(pt, 1, 3, na(zTop) ? "—" : fmt(zBot) + " – " + fmt(zTop), text_color = zDir == 1 ? colL : colH, text_size = sizeOf(tSizeIn))
+    table.cell(pt, 0, 4, tr("فاصله تا ناحیه", "Distance"), text_color = color.silver, text_size = sizeOf(tSizeIn))
+    table.cell(pt, 1, 4, na(dist) ? "—" : (dist <= 0 ? tr("داخل ناحیه", "inside") : str.tostring(dist, "#.##") + "%"), text_color = color.white, text_size = sizeOf(tSizeIn))
+    table.cell(pt, 0, 5, tr("ماشه ورود", "Trigger"), text_color = color.silver, text_size = sizeOf(tSizeIn))
+    table.cell(pt, 1, 5, tr("123Flag", "123Flag") + (trigN3 ? tr(" یا نود 3", " or node 3") : "") + tr(" داخل ناحیه، هم‌جهت ", " inside zone, with ") + tfName(dirTfA), text_color = color.white, text_size = sizeOf(tSizeIn))
+    table.cell(pt, 0, 6, tr("آخرین ورود", "Last entry"), text_color = color.silver, text_size = sizeOf(tSizeIn))
+    table.cell(pt, 1, 6, pSide == 0 ? "—" : (pSide == 1 ? "BUY" : "SELL") + "  SL " + fmt(pSL) + "  TP " + fmt(pTP), text_color = pSide == 1 ? colL : pSide == -1 ? colH : color.gray, text_size = sizeOf(tSizeIn))
+    table.cell(pt, 0, 7, tr("یادآوری", "Note"), text_color = color.silver, text_size = sizeOf(tSizeIn))
+    table.cell(pt, 1, 7, tr("ریسک هر معامله ≤ 2% سرمایه؛ ابزار تحلیلی است، نه تضمین سود", "Risk ≤ 2% per trade; analysis tool, no guarantee"), text_color = color.gray, text_size = size.tiny)
+
+// ---------------------------------------------------------------- Alerts
+alertcondition(evZoneIn, "NDS: قیمت وارد ناحیه خوش‌قیمت شد", "NDS: price entered the value zone on {{ticker}} {{interval}}")
+alertcondition(trigLong, "NDS: ورود خرید (پنل ترید)", "NDS: planner BUY on {{ticker}} {{interval}}")
+alertcondition(trigShort, "NDS: ورود فروش (پنل ترید)", "NDS: planner SELL on {{ticker}} {{interval}}")
+alertcondition(evBearFlag, "NDS: 123Flag فروش (Short)", "NDS: Short 123Flag on {{ticker}} {{interval}}")
+alertcondition(evBullFlag, "NDS: 123Flag خرید (Long)", "NDS: Long 123Flag on {{ticker}} {{interval}}")
+alertcondition(ta.change(chB) != 0 and chB == 1, "NDS: روند این تایم‌فریم صعودی شد", "NDS: trend turned bullish on {{ticker}} {{interval}}")
+alertcondition(ta.change(chB) != 0 and chB == -1, "NDS: روند این تایم‌فریم نزولی شد", "NDS: trend turned bearish on {{ticker}} {{interval}}")
+alertcondition(evH3, "NDS: نود 3 سقف (انتظار ریزش)", "NDS: Peak node 3 formed on {{ticker}} {{interval}}")
+alertcondition(evL3, "NDS: نود 3 کف (انتظار صعود)", "NDS: Trough node 3 formed on {{ticker}} {{interval}}")
+alertcondition(evHookPos, "NDS: هوک مثبت بسته شد", "NDS: Positive hook closed on {{ticker}} {{interval}}")
+alertcondition(evHookNeg, "NDS: هوک منفی بسته شد", "NDS: Negative hook closed on {{ticker}} {{interval}}")
+alertcondition(evHHRup, "NDS: هوک-هوک-رالی صعودی", "NDS: Bullish Hook-Hook-Rally on {{ticker}} {{interval}}")
+alertcondition(evHHRdn, "NDS: هوک-هوک-رالی نزولی", "NDS: Bearish Hook-Hook-Rally on {{ticker}} {{interval}}")
+
+if evBearFlag or evBullFlag
+    alert("NDS " + (evBearFlag ? "SHORT" : "LONG") + " 123Flag | " + syminfo.ticker + " " + timeframe.period + " | E " + fmt(fEnt) + " SL " + fmt(fSL) + " TP1 " + fmt(fTP1) + " TP2 " + fmt(fTP2), alert.freq_once_per_bar_close)

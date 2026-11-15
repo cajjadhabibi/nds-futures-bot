@@ -1,0 +1,57 @@
+# ================= تنظیمات ربات NDS =================
+# خطوطی که با # شروع می‌شوند توضیح هستند.
+
+# توکنی که BotFather داد را بعد از = بگذارید (بدون فاصله و بدون علامت نقل‌قول)
+TELEGRAM_TOKEN=PASTE_YOUR_TOKEN_HERE
+
+# خالی بگذارید؛ ربات بعد از اولین اجرا خودش پر می‌کند
+CHAT_ID=
+
+# نمادهای بایننس که رصد می‌شوند (با کاما جدا کنید)
+SYMBOLS=ETHUSDT,BTCUSDT
+
+# تایم‌فریم ورود و دو تایم‌فریم جهت
+ENTRY_TF=5m
+DIR_TF_A=15m
+DIR_TF_B=4h
+# yes = هر دو تایم‌فریم جهت باید هم‌جهت باشند
+NEED_BOTH=yes
+
+# طول پیوت: auto = خودش هر چند ساعت بهترین را از بین PIVOT_CHOICES انتخاب می‌کند
+PIVOT=auto
+PIVOT_CHOICES=3,5,8
+REOPTIMIZE_HOURS=6
+TREND_PIVOT=5
+
+# ناحیه خوش‌قیمت
+ZONE_WIDTH_ATR=0.6
+ZONE_MEMORY_BARS=40
+TRIGGER_NODE3=yes
+
+# هر چند ثانیه بازار چک شود
+CHECK_SECONDS=30
+# yes = پیام «صبر کن» هم بفرستد؛ no = فقط «در ناحیه» و «ورود»
+SEND_WAIT_MESSAGES=yes
+
+# ---------- پوزیشن‌ها و مدیریت سرمایه ----------
+# paper = پوزیشن آزمایشی خودکار (بدون پول واقعی) | signal = فقط سیگنال و حجم پیشنهادی
+MODE=paper
+ACCOUNT_BALANCE=1000
+RISK_PERCENT=1
+MAX_LEVERAGE=5
+MAX_OPEN_POSITIONS=2
+DAILY_MAX_LOSS_PERCENT=3
+PARTIAL_TP=yes
+FEE_PERCENT=0.04
+# هر چند ساعت گزارش دوره‌ای (0 = خاموش)
+REPORT_EVERY_HOURS=0
+# نوع کندل برای ساختار NDS: heikin_ashi یا normal (ورود و حدضرر همیشه با قیمت واقعی)
+CANDLES=heikin_ashi
+
+# ---------- اسکنر ارزها ----------
+SCAN=yes
+SCAN_TOP=30
+MARKET=futures
+SCAN_REFRESH_HOURS=6
+MIN_ATR_PCT=0.05
+MAX_ATR_PCT=3

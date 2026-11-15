@@ -1,0 +1,8 @@
+# secrets and runtime files — never commit
+config.txt
+state.json
+signals.csv
+nds_bot.log
+__pycache__/
+*.pyc
+testdata*/
