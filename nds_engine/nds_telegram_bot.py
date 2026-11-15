@@ -16,6 +16,7 @@ from nds_engine.flag_setup import SetupDirection
 
 CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bot_config.json")
 TRADES_DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "active_trades.json")
+SUBSCRIBERS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "subscribers.json")
 MINI_APP_URL = "https://nds-futures-market-scanner-telegram-mini-app-for-x5vpqy4cnn.openbot.site"
 
 def load_config():
@@ -56,50 +57,81 @@ def load_config():
     cfg["telegram_bot_token"] = token or cfg.get("telegram_bot_token", "")
     return cfg
 
+def load_subscribers(default_chat_id: str = "") -> list:
+    subs = []
+    if os.path.exists(SUBSCRIBERS_PATH):
+        try:
+            with open(SUBSCRIBERS_PATH, "r", encoding="utf-8") as f:
+                subs = json.load(f)
+        except Exception:
+            subs = []
+    if default_chat_id and str(default_chat_id) not in subs:
+        subs.append(str(default_chat_id))
+    return subs
+
+def add_subscriber(chat_id: str):
+    subs = load_subscribers()
+    cid = str(chat_id)
+    if cid not in subs:
+        subs.append(cid)
+        try:
+            with open(SUBSCRIBERS_PATH, "w", encoding="utf-8") as f:
+                json.dump(subs, f, indent=2)
+            print(f"Added new subscriber: {cid}")
+        except Exception as e:
+            print(f"Error saving subscriber: {e}")
+
 class NDSTelegramNotifier:
     def __init__(self, bot_token: str = None, chat_id: str = None):
         self.bot_token = bot_token
         self.chat_id = str(chat_id) if chat_id else ""
+        if self.chat_id:
+            add_subscriber(self.chat_id)
 
     def send_message(self, text: str, parse_mode: str = "HTML", with_miniapp_button: bool = True, chat_id: str = None) -> bool:
-        """Send message to Telegram chat with optional WebApp button"""
-        target_chat = str(chat_id) if chat_id else self.chat_id
-        if not self.bot_token or not target_chat:
-            print(f"\n[ALERT GENERATED - DRY RUN (Missing token or chat_id)]:\n{text}\n")
+        """Send message to a specific user or broadcast to all registered subscribers"""
+        if chat_id:
+            targets = [str(chat_id)]
+        else:
+            targets = load_subscribers(self.chat_id)
+
+        if not self.bot_token or not targets:
+            print(f"\n[ALERT GENERATED - DRY RUN (Missing token or targets)]:\n{text}\n")
             return False
 
-        url = f"https://api.telegram.org/bot{self.bot_token}/sendMessage"
-        payload = {
-            "chat_id": target_chat,
-            "text": text,
-            "parse_mode": parse_mode
-        }
-        if with_miniapp_button:
-            payload["reply_markup"] = {
-                "inline_keyboard": [
-                    [
-                        {"text": "📊 مشاهده وضعیت در مینی‌اپ", "web_app": {"url": MINI_APP_URL}}
-                    ]
-                ]
+        success = False
+        for tid in targets:
+            url = f"https://api.telegram.org/bot{self.bot_token}/sendMessage"
+            payload = {
+                "chat_id": tid,
+                "text": text,
+                "parse_mode": parse_mode
             }
+            if with_miniapp_button:
+                payload["reply_markup"] = {
+                    "inline_keyboard": [
+                        [
+                            {"text": "📊 مشاهده وضعیت در مینی‌اپ", "web_app": {"url": MINI_APP_URL}}
+                        ]
+                    ]
+                }
 
-        req = urllib.request.Request(
-            url, 
-            data=json.dumps(payload).encode('utf-8'),
-            headers={'Content-Type': 'application/json', 'User-Agent': 'NDSBot/1.0'}
-        )
-        try:
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                res = json.loads(resp.read().decode())
-                ok = res.get("ok", False)
-                if ok:
-                    print(f"[{datetime.now().strftime('%H:%M:%S')}] پیام با موفقیت به تلگرام ارسال شد.")
-                else:
-                    print(f"Telegram response not ok: {res}")
-                return ok
-        except Exception as e:
-            print(f"Error sending to Telegram: {e}")
-            return False
+            req = urllib.request.Request(
+                url, 
+                data=json.dumps(payload).encode('utf-8'),
+                headers={'Content-Type': 'application/json', 'User-Agent': 'NDSBot/1.0'}
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    res = json.loads(resp.read().decode())
+                    if res.get("ok"):
+                        success = True
+            except Exception as e:
+                print(f"Error sending to {tid}: {e}")
+
+        if success:
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] پیام با موفقیت به {len(targets)} کاربر تلگرام ارسال شد.")
+        return success
 
     def format_alert(self, symbol: str, timeframe: str, setup_data: dict) -> str:
         direction = setup_data['direction']
@@ -120,7 +152,7 @@ class NDSTelegramNotifier:
             f"🎯 <b>تارگت نهایی (TP4 - انتهای چرخه):</b> <code>{setup_data.get('tp4', 0.0):.4f}</code>\n\n"
             f"💎 <b>نسبت سود به ریسک (R/R):</b> <code>1:{setup_data['rr']:.1f}</code> ✅\n"
             f"⏱ <b>زمان ثبت:</b> {datetime.now().strftime('%H:%M:%S')}\n\n"
-            f"<i>📌 تحقق تارگت‌ها یا استاپ به صورت لحظه‌ای گزارش داده می‌شود. با ارسال /trades می‌توانید کارنامه کل را مشاهده کنید.</i>"
+            f"<i>📌 تحقق تارگت‌ها یا استاپ لحظه‌ای گزارش می‌شود. با ارسال /trades می‌توانید کارنامه کل را مشاهده کنید.</i>"
         )
         return msg
 
@@ -389,17 +421,21 @@ class NDSScannerBot:
                                 chat_id = str(msg.get("chat", {}).get("id"))
                                 text = msg.get("text", "").strip().lower()
 
+                                # Auto subscribe any user that interacts with bot
+                                add_subscriber(chat_id)
+
                                 if text in ["/trades", "/status", "/report", "/tp", "/sl", "وضعیت", "معاملات", "گزارش"]:
                                     report = self.tracker.get_summary_report()
                                     self.notifier.send_message(report, with_miniapp_button=True, chat_id=chat_id)
                                 elif text in ["/start", "/help", "شروع", "راهنما"]:
                                     welcome = (
-                                        "🤖 <b>ربات اسکنر و رهگیر زنده معاملات NDS V1.2</b>\n\n"
+                                        "🤖 <b>به ربات اسکنر و مینی‌اپ تحلیلی NDS V1.2 خوش آمدید!</b>\n\n"
                                         "این ربات بازار ۳۰ ارز برتر را برای ستاپ‌های 123Flag با R/R حداقل ۱:۳ اسکن کرده و تمام مراحل معامله را تا لمس تارگت‌ها یا استاپ پیگیری می‌کند.\n\n"
-                                        "📌 <b>دستورات:</b>\n"
+                                        "📌 <b>دستورات و امکانات:</b>\n"
+                                        "▫️ دکمه زیر برای باز کردن <b>مینی‌اپ تلگرام (Mini App)</b>\n"
                                         "▫️ /trades یا /status - <i>کارنامه تفکیکی معاملات (کدام TP خورده، کدام استاپ خورده)</i>\n"
                                         "▫️ /report - <i>آمار کلی و وین‌ریت</i>\n\n"
-                                        "✨ هر زمان تارگتی تاچ شود، پیام اختصاصی آن برای شما ارسال می‌شود."
+                                        "✨ تمام ستاپ‌های جدید و تارگت‌های تاچ شده به صورت همزمان برای شما ارسال خواهد شد."
                                     )
                                     self.notifier.send_message(welcome, with_miniapp_button=True, chat_id=chat_id)
                 except Exception:
