@@ -112,15 +112,15 @@ class NDSTelegramNotifier:
             f"▪️ <b>تایم‌فریم:</b> {timeframe}\n"
             f"▪️ <b>ستاپ:</b> 123Flag Setup\n"
             f"▪️ <b>جهت معامله:</b> {dir_text}\n\n"
-            f"📍 <b>نقطه ورود (Entry):</b> <code>{setup_data['entry']:.2f}</code>\n"
-            f"🛑 <b>حد ضرر (Stop Loss):</b> <code>{setup_data['sl']:.2f}</code>\n\n"
-            f"🎯 <b>تارگت اول (نود باز ۱):</b> <code>{setup_data['tp1']:.2f}</code>\n"
-            f"🎯 <b>تارگت دوم (نود باز ۲):</b> <code>{setup_data['tp2']:.2f}</code>\n"
-            f"🎯 <b>تارگت طلایی (۸۶.۴٪ هوک):</b> <code>{setup_data['tp3']:.2f}</code>\n"
-            f"🎯 <b>تارگت نهایی (کف/سقف چرخه):</b> <code>{setup_data.get('tp4', 0.0):.2f}</code>\n\n"
+            f"📍 <b>نقطه ورود (Entry):</b> <code>{setup_data['entry']:.4f}</code>\n"
+            f"🛑 <b>حد ضرر (Stop Loss):</b> <code>{setup_data['sl']:.4f}</code>\n\n"
+            f"🎯 <b>تارگت اول (TP1):</b> <code>{setup_data['tp1']:.4f}</code>\n"
+            f"🎯 <b>تارگت دوم (TP2):</b> <code>{setup_data['tp2']:.4f}</code>\n"
+            f"🎯 <b>تارگت طلایی (TP3 - ۸۶.۴٪ هوک):</b> <code>{setup_data['tp3']:.4f}</code>\n"
+            f"🎯 <b>تارگت نهایی (TP4 - انتهای چرخه):</b> <code>{setup_data.get('tp4', 0.0):.4f}</code>\n\n"
             f"💎 <b>نسبت سود به ریسک (R/R):</b> <code>1:{setup_data['rr']:.1f}</code> ✅\n"
-            f"⏱ <b>زمان ستاپ:</b> {datetime.now().strftime('%H:%M:%S')}\n\n"
-            f"<i>📌 وضعیت تحقق تارگت‌ها یا استاپ به صورت لحظه‌ای گزارش می‌شود. با ارسال /trades می‌توانید کارنامه را ببینید.</i>"
+            f"⏱ <b>زمان ثبت:</b> {datetime.now().strftime('%H:%M:%S')}\n\n"
+            f"<i>📌 تحقق تارگت‌ها یا استاپ به صورت لحظه‌ای گزارش داده می‌شود. با ارسال /trades می‌توانید کارنامه کل را مشاهده کنید.</i>"
         )
         return msg
 
@@ -135,13 +135,13 @@ class NDSTelegramNotifier:
             f"<b>{emoji} تارگت تاچ شد! | TARGET HIT {emoji}</b>\n\n"
             f"▫️ <b>نماد:</b> {trade['symbol']}\n"
             f"▫️ <b>جهت معامله:</b> {dir_text}\n"
-            f"▫️ <b>تارگت محقق‌شده:</b> {target_name} (<code>{target_price:.2f}</code>)\n"
-            f"▫️ <b>قیمت ورود:</b> <code>{entry:.2f}</code>\n"
-            f"▫️ <b>قیمت جاری:</b> <code>{current_price:.2f}</code>\n"
-            f"▫️ <b>میزان سود:</b> <code>+{profit:.2f} $</code> (<b>+{pct:.2f}%</b>)\n\n"
+            f"▫️ <b>تارگت محقق‌شده:</b> {target_name} (<code>{target_price:.4f}</code>)\n"
+            f"▫️ <b>قیمت ورود:</b> <code>{entry:.4f}</code>\n"
+            f"▫️ <b>قیمت جاری:</b> <code>{current_price:.4f}</code>\n"
+            f"▫️ <b>میزان سود:</b> <code>+{profit:.4f} $</code> (<b>+{pct:.2f}%</b>)\n\n"
         )
         if is_final:
-            msg += "💎 <b>نتیجه:</b> چرخه ساختار NDS کامل شد و تمامی اهداف سود محقق گردیدند."
+            msg += "💎 <b>نتیجه:</b> چرخه ساختار NDS کامل شد و تمامی اهداف سود شناسایی گردیدند."
         else:
             msg += "💡 <b>توصیه NDS:</b> استاپ لاس را به نقطه ورود (Risk-Free) منتقل نمایید تا ریسک معامله به صفر برسد."
         return msg
@@ -156,10 +156,10 @@ class NDSTelegramNotifier:
             f"<b>🛑 حد ضرر فعال شد | STOP LOSS HIT 🛑</b>\n\n"
             f"▫️ <b>نماد:</b> {trade['symbol']}\n"
             f"▫️ <b>جهت معامله:</b> {dir_text}\n"
-            f"▫️ <b>قیمت استاپ:</b> <code>{sl_price:.2f}</code>\n"
-            f"▫️ <b>قیمت ورود:</b> <code>{entry:.2f}</code>\n"
-            f"▫️ <b>اختلاف:</b> <code>-{loss:.2f} $</code> (-{pct:.2f}%)\n\n"
-            f"<i>ℹ️ پوزیشن طبق مدیریت سرمایه NDS بسته شد. بازار برای موج و نودهای جدید رصد می‌شود.</i>"
+            f"▫️ <b>قیمت استاپ:</b> <code>{sl_price:.4f}</code>\n"
+            f"▫️ <b>قیمت ورود:</b> <code>{entry:.4f}</code>\n"
+            f"▫️ <b>میزان ضرر:</b> <code>-{loss:.4f} $</code> (-{pct:.2f}%)\n\n"
+            f"<i>ℹ️ پوزیشن طبق مدیریت سرمایه NDS بسته شد. بازار برای امواج و نودهای بعدی رصد می‌شود.</i>"
         )
         return msg
 
@@ -209,7 +209,7 @@ class PositionTracker:
                 "history": []
             }
             self.save_trades()
-            print(f"[{datetime.now().strftime('%H:%M:%S')}] پوزیشن {setup_id} در سامانه رهگیری ثبت شد.")
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] پوزیشن زنده {setup_id} در سامانه رهگیری ثبت شد.")
 
     def check_trade(self, symbol: str, high: float, low: float, current_price: float):
         for trade_id, t in list(self.trades.items()):
@@ -218,25 +218,26 @@ class PositionTracker:
 
             direction = t["direction"]
             now_str = datetime.now().strftime('%H:%M:%S')
+            entry = t["entry"]
 
             # LONG Check
             if direction == "LONG":
                 # Check TP1
-                if not t["tp1_hit"] and high >= t["tp1"]:
+                if not t["tp1_hit"] and t["tp1"] > entry and high >= t["tp1"]:
                     t["tp1_hit"] = True
                     t["history"].append(f"TP1 تاچ شد در {now_str}")
                     msg = self.notifier.format_target_hit(t, "تارگت اول (TP1)", t["tp1"], current_price)
                     self.notifier.send_message(msg)
 
                 # Check TP2
-                if not t["tp2_hit"] and high >= t["tp2"]:
+                if not t["tp2_hit"] and t["tp2"] > entry and high >= t["tp2"]:
                     t["tp2_hit"] = True
                     t["history"].append(f"TP2 تاچ شد در {now_str}")
                     msg = self.notifier.format_target_hit(t, "تارگت دوم (TP2)", t["tp2"], current_price)
                     self.notifier.send_message(msg)
 
                 # Check TP3 (Golden Hook)
-                if not t["tp3_hit"] and high >= t["tp3"]:
+                if not t["tp3_hit"] and t["tp3"] > entry and high >= t["tp3"]:
                     t["tp3_hit"] = True
                     t["is_closed"] = True
                     t["close_reason"] = "TP3_HIT"
@@ -245,7 +246,7 @@ class PositionTracker:
                     self.notifier.send_message(msg)
 
                 # Check SL (only if TP3 not hit)
-                elif not t["sl_hit"] and low <= t["sl"]:
+                elif not t["sl_hit"] and t["sl"] < entry and low <= t["sl"]:
                     t["sl_hit"] = True
                     t["is_closed"] = True
                     t["close_reason"] = "SL_HIT"
@@ -256,21 +257,21 @@ class PositionTracker:
             # SHORT Check
             elif direction == "SHORT":
                 # Check TP1
-                if not t["tp1_hit"] and low <= t["tp1"]:
+                if not t["tp1_hit"] and t["tp1"] < entry and low <= t["tp1"]:
                     t["tp1_hit"] = True
                     t["history"].append(f"TP1 تاچ شد در {now_str}")
                     msg = self.notifier.format_target_hit(t, "تارگت اول (TP1)", t["tp1"], current_price)
                     self.notifier.send_message(msg)
 
                 # Check TP2
-                if not t["tp2_hit"] and low <= t["tp2"]:
+                if not t["tp2_hit"] and t["tp2"] < entry and low <= t["tp2"]:
                     t["tp2_hit"] = True
                     t["history"].append(f"TP2 تاچ شد در {now_str}")
                     msg = self.notifier.format_target_hit(t, "تارگت دوم (TP2)", t["tp2"], current_price)
                     self.notifier.send_message(msg)
 
                 # Check TP3 (Golden Hook)
-                if not t["tp3_hit"] and low <= t["tp3"]:
+                if not t["tp3_hit"] and t["tp3"] < entry and low <= t["tp3"]:
                     t["tp3_hit"] = True
                     t["is_closed"] = True
                     t["close_reason"] = "TP3_HIT"
@@ -279,7 +280,7 @@ class PositionTracker:
                     self.notifier.send_message(msg)
 
                 # Check SL
-                elif not t["sl_hit"] and high >= t["sl"]:
+                elif not t["sl_hit"] and t["sl"] > entry and high >= t["sl"]:
                     t["sl_hit"] = True
                     t["is_closed"] = True
                     t["close_reason"] = "SL_HIT"
@@ -315,9 +316,9 @@ class PositionTracker:
                 status = " + ".join(hits)
                 tp_hits.append(f"• <b>{sym}</b> ({dir_str}): تاچ <b>{status}</b> ✅")
             elif t.get("sl_hit"):
-                sl_hits.append(f"• <b>{sym}</b> ({dir_str}): استاپ در <code>{t['sl']:.2f}</code> فعال شد 🛑")
+                sl_hits.append(f"• <b>{sym}</b> ({dir_str}): استاپ در <code>{t['sl']:.4f}</code> فعال شد 🛑")
             elif not t.get("is_closed"):
-                active.append(f"• <b>{sym}</b> ({dir_str}): ورود <code>{t['entry']:.2f}</code> | در حال حرکت ⏳")
+                active.append(f"• <b>{sym}</b> ({dir_str}): ورود <code>{t['entry']:.4f}</code> | در حال حرکت ⏳")
 
         total = len(self.trades)
         wins = len(tp_hits)
@@ -401,7 +402,7 @@ class NDSScannerBot:
                                         "✨ هر زمان تارگتی تاچ شود، پیام اختصاصی آن برای شما ارسال می‌شود."
                                     )
                                     self.notifier.send_message(welcome, with_miniapp_button=True, chat_id=chat_id)
-                except Exception as e:
+                except Exception:
                     time.sleep(5)
 
         t = threading.Thread(target=loop, daemon=True)
@@ -432,7 +433,7 @@ class NDSScannerBot:
         except Exception:
             return None
 
-        # Robust check of recent candles (last 5 candles = 25 minutes) for any TP / SL touch
+        # Robust check of recent candles (last 5 candles) for any TP / SL touch
         recent = df.tail(5)
         high_val = float(recent['High'].max())
         low_val = float(recent['Low'].min())
@@ -459,16 +460,34 @@ class NDSScannerBot:
         active_setup = None
         if setups:
             latest = setups[-1]
-            if latest.risk_reward >= self.min_rr:
+            # Must be a recent setup (Flag node among the last 3 swing nodes of the chart)
+            flag_idx = nodes.index(latest.flag_node) if latest.flag_node in nodes else -1
+            is_recent = (flag_idx >= len(nodes) - 3)
+
+            if is_recent and latest.risk_reward >= self.min_rr:
+                risk = abs(latest.entry_price - latest.stop_loss)
+                if latest.direction == SetupDirection.LONG:
+                    tp1 = latest.take_profit_1
+                    tp2 = latest.take_profit_2 if latest.take_profit_2 > tp1 else (latest.entry_price + risk * 2.5)
+                    hook_lvl = res.get("latest_864_level")
+                    tp3 = hook_lvl if (hook_lvl and hook_lvl > tp2) else (latest.entry_price + risk * 3.5)
+                    tp4 = peaks[-1].price if (peaks and peaks[-1].price > tp3) else (latest.entry_price + risk * 4.5)
+                else:  # SHORT
+                    tp1 = latest.take_profit_1
+                    tp2 = latest.take_profit_2 if latest.take_profit_2 < tp1 else (latest.entry_price - risk * 2.5)
+                    hook_lvl = res.get("latest_864_level")
+                    tp3 = hook_lvl if (hook_lvl and hook_lvl < tp2) else (latest.entry_price - risk * 3.5)
+                    tp4 = valleys[-1].price if (valleys and valleys[-1].price < tp3) else (latest.entry_price - risk * 4.5)
+
                 active_setup = {
                     "symbol": symbol,
                     "direction": latest.direction.value,
                     "entry": latest.entry_price,
                     "sl": latest.stop_loss,
-                    "tp1": latest.take_profit_1,
-                    "tp2": latest.take_profit_2,
-                    "tp3": res.get("latest_864_level") or (latest.entry_price * 0.99),
-                    "tp4": valleys[-1].price if latest.direction == SetupDirection.SHORT else peaks[-1].price,
+                    "tp1": tp1,
+                    "tp2": tp2,
+                    "tp3": tp3,
+                    "tp4": tp4,
                     "rr": latest.risk_reward,
                     "timestamp": str(latest.timestamp)
                 }
@@ -490,10 +509,10 @@ class NDSScannerBot:
 
             if data['active_setup']:
                 setup = data['active_setup']
-                setup_id = f"{sym}_{setup['direction']}_{setup['entry']:.1f}"
+                setup_id = f"{sym}_{setup['direction']}_{setup['entry']:.2f}"
                 if setup_id not in self.alerted_setups:
                     self.alerted_setups.add(setup_id)
-                    print(f"  🚨 ستاپ طلایی جدید: {sym} | R/R 1:{setup['rr']:.1f} -> ارسال و ثبت در رهگیر...", flush=True)
+                    print(f"  🚨 ستاپ طلایی زنده: {sym} | R/R 1:{setup['rr']:.1f} -> ارسال و ثبت در رهگیر...", flush=True)
                     self.tracker.add_trade(setup_id, setup)
                     msg = self.notifier.format_alert(sym, self.timeframe, setup)
                     self.notifier.send_message(msg, with_miniapp_button=True)

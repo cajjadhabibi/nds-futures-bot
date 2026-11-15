@@ -57,10 +57,16 @@ class FlagSetupDetector:
                             # Valid 123Flag Short setup
                             entry = f_node.price
                             sl = entry + abs(f_node.price - p3.price) * 0.3 + (entry * 0.001) # SL just above F
-                            tp1 = valleys[0].price # Open valley 1/2
-                            tp2 = level_864 if level_864 else (entry - (entry - tp1) * 2.0)
-
                             risk = abs(sl - entry)
+                            
+                            valleys_below = [v.price for v in valleys if v.price < entry]
+                            tp1 = valleys_below[0] if valleys_below else (entry - risk * 1.5)
+                            
+                            if level_864 and level_864 < tp1:
+                                tp2 = level_864
+                            else:
+                                tp2 = entry - risk * 3.5
+
                             reward = abs(entry - tp2)
                             rr = reward / risk if risk > 0 else 0.0
 
@@ -88,10 +94,16 @@ class FlagSetupDetector:
                         if f_node.price <= v3.price:
                             entry = f_node.price
                             sl = entry - abs(v3.price - f_node.price) * 0.3 - (entry * 0.001)
-                            tp1 = peaks[0].price # Open peak
-                            tp2 = level_864 if level_864 else (entry + (tp1 - entry) * 2.0)
-
                             risk = abs(entry - sl)
+                            
+                            peaks_above = [p.price for p in peaks if p.price > entry]
+                            tp1 = peaks_above[0] if peaks_above else (entry + risk * 1.5)
+                            
+                            if level_864 and level_864 > tp1:
+                                tp2 = level_864
+                            else:
+                                tp2 = entry + risk * 3.5
+
                             reward = abs(tp2 - entry)
                             rr = reward / risk if risk > 0 else 0.0
 
