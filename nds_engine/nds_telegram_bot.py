@@ -1078,12 +1078,16 @@ class NDSScannerBot:
                     self.alerted_setups.add(setup_id)
                     print(f"  🚨 ستاپ طلایی زنده: {sym} | R/R 1:{setup['rr']:.1f} -> ارسال و ثبت در رهگیر...", flush=True)
                     self.tracker.add_trade(setup_id, setup)
-                    msg = self.notifier.format_alert(sym, self.timeframe, setup)
-                    self.notifier.send_message(msg, with_miniapp_button=True)
+                    # Place the Bybit demo order first so the signal can say whether it opened there
+                    bybit_info = None
                     try:
-                        self.executor.on_new_trade(setup_id, self.tracker.trades[setup_id])
+                        bybit_info = self.executor.on_new_trade(setup_id, self.tracker.trades[setup_id])
                     except Exception as e:
                         print(f"  [bybit_demo] open error: {e}", flush=True)
+                    msg = self.notifier.format_alert(sym, self.timeframe, setup)
+                    if bybit_info:
+                        msg += self.executor.signal_line(bybit_info)
+                    self.notifier.send_message(msg, with_miniapp_button=True)
 
         try:
             self.executor.sync(self.tracker.trades)

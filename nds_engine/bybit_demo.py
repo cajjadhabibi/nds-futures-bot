@@ -154,11 +154,12 @@ class BybitDemoExecutor:
 
     # ---------- actions ----------
     def on_new_trade(self, trade_id, t):
+        """Open the trade on Bybit demo. Returns fill info when a position was opened, else None."""
         if not self.active():
-            return
+            return None
         with self.lock:
             try:
-                self._open(trade_id, t)
+                return self._open(trade_id, t)
             finally:
                 self._save()
 
@@ -221,11 +222,16 @@ class BybitDemoExecutor:
             "opened_ms": int(time.time() * 1000) - 5000, "opened_at": f"{datetime.now():%Y-%m-%d %H:%M:%S}",
         }
         self._event(f"OPEN {t['direction']} {sym} qty {qty} @ {avg:g}")
-        self.notify(
-            f"🧪 <b>Bybit Demo — پوزیشن باز شد</b>\n"
-            f"{'🟢 LONG' if long_ else '🔴 SHORT'} <code>{sym}</code> | حجم {qty} (~{notional:.0f}$، اهرم {LEVERAGE}x)\n"
-            f"ورود {avg:g} | SL {_fmt_price(sl, tick)} | TP {_fmt_price(tp, tick)}\n"
-            f"بودجه: {self.equity():.2f}$ | پوزیشن باز: {len(self.open_positions())}")
+        return {"symbol": sym, "qty": qty, "fill": avg, "notional": notional, "leverage": LEVERAGE,
+                "sl": _fmt_price(sl, tick), "tp": _fmt_price(tp, tick)}
+
+    @staticmethod
+    def signal_line(info):
+        """Line appended to the Telegram signal when the trade was opened on Bybit demo."""
+        return (f"\n\n🧪 <b>این معامله در Bybit (حساب دمو) هم باز شد ✅</b>\n"
+                f"▫️ <code>{info['symbol']}</code> | ورود {info['fill']:g} | حجم {info['qty']} "
+                f"(~{info['notional']:.0f}$، اهرم {info['leverage']}x)\n"
+                f"▫️ SL {info['sl']} | TP {info['tp']} (ثبت‌شده روی صرافی)")
 
     def _position(self, sym):
         r = self._req("GET", "/v5/position/list", {"category": "linear", "symbol": sym})
