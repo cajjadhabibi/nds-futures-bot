@@ -8,9 +8,19 @@ from datetime import datetime
 
 # Import NDS Scanner Bot
 from nds_engine.nds_telegram_bot import NDSScannerBot
+from nds_engine import cloud_store
+import signal
 
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
+        if self.path.startswith('/health'):
+            body = json.dumps({"status": "ok", "time": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                               "persistence": cloud_store.enabled()}).encode('utf-8')
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            self.wfile.write(body)
+            return
         self.send_response(200)
         self.send_header('Content-Type', 'application/json; charset=utf-8')
         self.send_header('Access-Control-Allow-Origin', '*')
@@ -60,6 +70,22 @@ def start_nds_background():
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
+
+    # 0. Restore trades/subscribers from the private GitHub data repo (Render disk is wiped on every deploy)
+    try:
+        cloud_store.restore()
+    except Exception as e:
+        print(f"[cloud_store] restore error: {e}", flush=True)
+    cloud_store.start_sync()
+    cloud_store.start_keepalive()
+
+    def _on_term(signum, frame):
+        print("SIGTERM received - saving data before shutdown...", flush=True)
+        try:
+            cloud_store.flush("shutdown")
+        finally:
+            os._exit(0)
+    signal.signal(signal.SIGTERM, _on_term)
     
     # 1. Start Scanner & Position Tracker in background thread
     t = threading.Thread(target=start_nds_background, daemon=True)

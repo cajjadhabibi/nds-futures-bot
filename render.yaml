@@ -9,3 +9,7 @@ services:
         sync: false
       - key: TELEGRAM_CHAT_ID
         sync: false
+      - key: GITHUB_TOKEN
+        sync: false
+      - key: DATA_REPO
+        value: cajjadhabibi/nds-bot-data

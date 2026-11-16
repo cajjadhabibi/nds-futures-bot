@@ -6,3 +6,6 @@ nds_bot.log
 __pycache__/
 *.pyc
 testdata*/
+nds_engine/active_trades.json
+nds_engine/subscribers.json
+nds_engine/pending_requests.json
