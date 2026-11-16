@@ -13,3 +13,7 @@ services:
         sync: false
       - key: DATA_REPO
         value: cajjadhabibi/nds-bot-data
+      - key: BYBIT_DEMO_API_KEY
+        sync: false
+      - key: BYBIT_DEMO_API_SECRET
+        sync: false

@@ -13,6 +13,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from nds_engine.analyzer import NDSMarketAnalyzer
 from nds_engine.node_detector import NodeType
 from nds_engine.flag_setup import SetupDirection
+from nds_engine.bybit_demo import BybitDemoExecutor
 
 CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bot_config.json")
 TRADES_DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "active_trades.json")
@@ -694,6 +695,9 @@ class NDSScannerBot:
         self._command_listener_running = False
         self.htf_cache = {}
         self.enable_htf_filter = True
+        # Bybit DEMO execution ($100 virtual budget); inactive without BYBIT_DEMO_API_KEY/SECRET
+        self.executor = BybitDemoExecutor(
+            notify=lambda text: self.notifier.send_message(text, chat_id=ADMIN_CHAT_ID, with_miniapp_button=False))
 
     def start_command_listener(self):
         """Background thread handling Admin approvals and restricted user commands"""
@@ -771,6 +775,14 @@ class NDSScannerBot:
 
                                 # Admin Specific Commands
                                 if is_admin:
+                                    if cmd in ["/demo", "/bybit", "دمو"]:
+                                        parts = raw_text.split()
+                                        if len(parts) > 1 and parts[1].lower() in ["off", "stop", "خاموش"]:
+                                            self.executor.set_enabled(False)
+                                        elif len(parts) > 1 and parts[1].lower() in ["on", "start", "روشن"]:
+                                            self.executor.set_enabled(True)
+                                        self.notifier.send_message(self.executor.report(), chat_id=chat_id, with_miniapp_button=False)
+                                        continue
                                     if cmd in ["/users", "/members", "اعضا", "کاربران"]:
                                         pending = load_pending_requests()
                                         msg_u = (
@@ -837,7 +849,9 @@ class NDSScannerBot:
                                 # Allowed Commands for Approved Members
                                 if cmd.startswith("/htf"):
                                     parts = raw_text.split()
-                                    if len(parts) > 1 and parts[1].lower() in ["off", "disable", "خاموش", "غیرفعال"]:
+                                    if len(parts) > 1 and not is_admin:
+                                        self.notifier.send_message("⛔ فقط مدیر می‌تواند فیلتر HTF را تغییر دهد.", chat_id=chat_id, with_miniapp_button=False)
+                                    elif len(parts) > 1 and parts[1].lower() in ["off", "disable", "خاموش", "غیرفعال"]:
                                         self.enable_htf_filter = False
                                         self.notifier.send_message("❌ فیلتر روند ماکرو (HTF Trend Filter) غیرفعال شد.", chat_id=chat_id, with_miniapp_button=False)
                                     elif len(parts) > 1 and parts[1].lower() in ["on", "enable", "روشن", "فعال"]:
@@ -1066,6 +1080,15 @@ class NDSScannerBot:
                     self.tracker.add_trade(setup_id, setup)
                     msg = self.notifier.format_alert(sym, self.timeframe, setup)
                     self.notifier.send_message(msg, with_miniapp_button=True)
+                    try:
+                        self.executor.on_new_trade(setup_id, self.tracker.trades[setup_id])
+                    except Exception as e:
+                        print(f"  [bybit_demo] open error: {e}", flush=True)
+
+        try:
+            self.executor.sync(self.tracker.trades)
+        except Exception as e:
+            print(f"  [bybit_demo] sync error: {e}", flush=True)
 
     def start_24_7(self):
         print(f"=== ربات اسکنر و رهگیر زنده NDS فعال شد ===", flush=True)
