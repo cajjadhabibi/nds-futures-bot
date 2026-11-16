@@ -275,14 +275,14 @@ class BybitDemoExecutor:
 
             mark = float(lp.get("markPrice") or 0)
             tp1_hit = paper.get("tp1_hit") or (mark and ((long_ and mark >= p["tp1"]) or (not long_ and mark <= p["tp1"])))
-            if paper.get("is_closed"):
+            if paper.get("is_closed") or tid not in paper_trades:   # closed, or voided by the tracker
                 side = "Sell" if long_ else "Buy"
                 c = self._req("POST", "/v5/order/create", {
                     "category": "linear", "symbol": sym, "side": side, "orderType": "Market",
                     "qty": lp["size"], "reduceOnly": True, "positionIdx": 0})
                 if c.get("retCode") == 0:
                     time.sleep(1.0)
-                    self._book_close(tid, p, f"paper {paper.get('close_reason')}")
+                    self._book_close(tid, p, f"paper {paper.get('close_reason', 'voided')}")
                 else:
                     _log(f"close {sym} failed: {c.get('retMsg')}")
             elif tp1_hit and not p["be"]:

@@ -19,6 +19,7 @@ CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bot_conf
 TRADES_DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "active_trades.json")
 SUBSCRIBERS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "subscribers.json")
 PENDING_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pending_requests.json")
+VOIDED_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "voided_trades.json")
 MINI_APP_URL = "https://nds-futures-market-scanner-telegram-mini-app-for-x5vpqy4cnn.openbot.site"
 ADMIN_CHAT_ID = "5640317397"
 
@@ -333,11 +334,68 @@ class NDSTelegramNotifier:
         return msg
 
 
+def targets_in_order(t: dict) -> bool:
+    """LONG: SL < Entry < TP1 < TP2 < TP3, SHORT: the reverse."""
+    try:
+        sl, e, t1, t2, t3 = (float(t[k]) for k in ("sl", "entry", "tp1", "tp2", "tp3"))
+    except (KeyError, TypeError, ValueError):
+        return False
+    if t.get("direction") == "LONG":
+        return sl < e < t1 < t2 < t3
+    return sl > e > t1 > t2 > t3
+
+
 class PositionTracker:
     def __init__(self, notifier: NDSTelegramNotifier, db_path: str = TRADES_DB_PATH):
         self.notifier = notifier
         self.db_path = db_path
         self.trades = self.load_trades()
+        self.cleanup_open_trades()
+
+    def cleanup_open_trades(self):
+        """Move broken open trades out of the stats into voided_trades.json:
+        targets out of order (created before the TP-ordering fix) and duplicate
+        open trades on the same coin (only the oldest one is kept)."""
+        voided = {}
+        open_by_symbol = {}
+        for tid, t in sorted(self.trades.items(), key=lambda kv: str(kv[1].get("created_at", ""))):
+            if t.get("is_closed"):
+                continue
+            if not targets_in_order(t):
+                voided[tid] = "INVALID_TARGET_ORDER"
+            elif t.get("symbol") in open_by_symbol:
+                voided[tid] = "DUPLICATE_OF " + open_by_symbol[t["symbol"]]
+            else:
+                open_by_symbol[t["symbol"]] = tid
+        if voided:
+            self.void_trades(voided)
+
+    def void_trades(self, reasons: dict):
+        store = {}
+        if os.path.exists(VOIDED_PATH):
+            try:
+                with open(VOIDED_PATH, "r", encoding="utf-8") as f:
+                    store = json.load(f)
+            except Exception:
+                store = {}
+        now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        for tid, why in reasons.items():
+            t = self.trades.pop(tid, None)
+            if t is None:
+                continue
+            t["void_reason"] = why
+            t["voided_at"] = now
+            store[tid] = t
+            print(f"[tracker] voided {tid}: {why}", flush=True)
+        try:
+            with open(VOIDED_PATH, "w", encoding="utf-8") as f:
+                json.dump(store, f, indent=2, ensure_ascii=False)
+        except Exception as e:
+            print(f"Error saving voided trades: {e}")
+        self.save_trades()
+
+    def has_open_trade(self, symbol: str) -> bool:
+        return any(t.get("symbol") == symbol and not t.get("is_closed") for t in self.trades.values())
 
     def load_trades(self) -> dict:
         if os.path.exists(self.db_path):
@@ -355,7 +413,17 @@ class PositionTracker:
         except Exception as e:
             print(f"Error saving trades: {e}")
 
-    def add_trade(self, setup_id: str, data: dict):
+    def add_trade(self, setup_id: str, data: dict) -> bool:
+        """Register a new signal. Returns False (nothing sent) for a repeat, a coin that
+        already has an open trade, or targets out of order."""
+        if setup_id in self.trades:
+            return False
+        if self.has_open_trade(data["symbol"]):
+            print(f"  [tracker] skip {setup_id}: {data['symbol']} already has an open trade", flush=True)
+            return False
+        if not targets_in_order(data):
+            print(f"  [tracker] skip {setup_id}: targets out of order", flush=True)
+            return False
         if setup_id not in self.trades:
             self.trades[setup_id] = {
                 "id": setup_id,
@@ -380,6 +448,7 @@ class PositionTracker:
             }
             self.save_trades()
             print(f"[{datetime.now().strftime('%H:%M:%S')}] پوزیشن زنده {setup_id} ثبت شد.")
+        return True
 
     def check_trade(self, symbol: str, high: float, low: float, current_price: float):
         for trade_id, t in list(self.trades.items()):
@@ -1076,8 +1145,10 @@ class NDSScannerBot:
                 setup_id = f"{sym}_{setup['direction']}_{setup.get('timestamp', '')}"
                 if setup_id not in self.alerted_setups:
                     self.alerted_setups.add(setup_id)
+                    # No signal for a repeat (e.g. after a restart), a coin with an open trade, or bad targets
+                    if not self.tracker.add_trade(setup_id, setup):
+                        continue
                     print(f"  🚨 ستاپ طلایی زنده: {sym} | R/R 1:{setup['rr']:.1f} -> ارسال و ثبت در رهگیر...", flush=True)
-                    self.tracker.add_trade(setup_id, setup)
                     # Place the Bybit demo order first so the signal can say whether it opened there
                     bybit_info = None
                     try:

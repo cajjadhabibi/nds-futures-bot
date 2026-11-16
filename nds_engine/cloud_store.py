@@ -24,7 +24,7 @@ import urllib.error
 import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-FILES = ["active_trades.json", "subscribers.json", "pending_requests.json", "exec_state.json"]
+FILES = ["active_trades.json", "subscribers.json", "pending_requests.json", "exec_state.json", "voided_trades.json"]
 
 TOKEN = os.environ.get("GITHUB_TOKEN", "").strip()
 REPO = os.environ.get("DATA_REPO", "cajjadhabibi/nds-bot-data").strip()

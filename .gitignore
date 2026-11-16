@@ -10,3 +10,4 @@ nds_engine/active_trades.json
 nds_engine/subscribers.json
 nds_engine/pending_requests.json
 nds_engine/exec_state.json
+nds_engine/voided_trades.json
