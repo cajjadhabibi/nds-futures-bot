@@ -1,0 +1,977 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>NDS Market Scanner & Trade Tracker</title>
+    <!-- Telegram WebApp SDK -->
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+        :root {
+            --bg-color: #0d1117;
+            --card-bg: #161b22;
+            --border-color: #30363d;
+            --accent-green: #10b981;
+            --accent-red: #ef4444;
+            --accent-purple: #8b5cf6;
+            --accent-yellow: #f59e0b;
+            --accent-blue: #3b82f6;
+            --text-primary: #f0f6fc;
+            --text-secondary: #8b949e;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Vazirmatn", Tahoma, sans-serif;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-primary);
+            padding: 12px;
+            padding-bottom: 85px;
+            min-height: 100vh;
+        }
+
+        /* Header */
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 4px 16px 4px;
+            border-bottom: 1px solid var(--border-color);
+            margin-bottom: 12px;
+        }
+
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .header-avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            border: 2px solid var(--accent-yellow);
+            box-shadow: 0 0 10px rgba(245, 158, 11, 0.4);
+        }
+
+        .app-title {
+            font-size: 1.05rem;
+            font-weight: 800;
+            background: linear-gradient(135deg, #f59e0b, #10b981);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .app-subtitle {
+            font-size: 0.72rem;
+            color: var(--text-secondary);
+        }
+
+        .live-badge {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            background: rgba(16, 185, 129, 0.15);
+            border: 1px solid rgba(16, 185, 129, 0.4);
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 0.72rem;
+            color: var(--accent-green);
+            font-weight: 600;
+        }
+
+        .pulse-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--accent-green);
+            animation: pulse 1.5s infinite;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(0.9); opacity: 0.7; }
+            50% { transform: scale(1.2); opacity: 1; box-shadow: 0 0 8px #10b981; }
+            100% { transform: scale(0.9); opacity: 0.7; }
+        }
+
+        /* Top Nav Tabs */
+        .tabs-nav {
+            display: flex;
+            gap: 8px;
+            overflow-x: auto;
+            padding-bottom: 6px;
+            margin-bottom: 14px;
+            scrollbar-width: none;
+        }
+
+        .tabs-nav::-webkit-scrollbar {
+            display: none;
+        }
+
+        .tab-btn {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            color: var(--text-secondary);
+            padding: 8px 14px;
+            border-radius: 20px;
+            font-size: 0.78rem;
+            font-weight: 600;
+            white-space: nowrap;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .tab-btn.active {
+            background: linear-gradient(135deg, rgba(245, 158, 11, 0.2), rgba(16, 185, 129, 0.2));
+            border-color: var(--accent-yellow);
+            color: #fff;
+            box-shadow: 0 2px 8px rgba(245, 158, 11, 0.2);
+        }
+
+        /* Stats Grid */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 8px;
+            margin-bottom: 16px;
+        }
+
+        .stat-card {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            padding: 10px 6px;
+            text-align: center;
+        }
+
+        .stat-val {
+            font-size: 1.15rem;
+            font-weight: 800;
+            margin-bottom: 2px;
+        }
+
+        .stat-lbl {
+            font-size: 0.65rem;
+            color: var(--text-secondary);
+        }
+
+        /* Filter Chips in Trades */
+        .filter-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 12px;
+            flex-wrap: wrap;
+        }
+
+        .filter-chips {
+            display: flex;
+            gap: 6px;
+            overflow-x: auto;
+            scrollbar-width: none;
+        }
+
+        .filter-chips::-webkit-scrollbar {
+            display: none;
+        }
+
+        .chip {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--border-color);
+            color: var(--text-secondary);
+            font-size: 0.7rem;
+            padding: 4px 10px;
+            border-radius: 12px;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+
+        .chip.active {
+            background: var(--accent-blue);
+            color: #fff;
+            border-color: var(--accent-blue);
+        }
+
+        .refresh-btn {
+            background: rgba(59, 130, 246, 0.15);
+            border: 1px solid var(--accent-blue);
+            color: var(--accent-blue);
+            font-size: 0.72rem;
+            padding: 5px 10px;
+            border-radius: 10px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .search-box {
+            width: 100%;
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            padding: 8px 12px;
+            border-radius: 10px;
+            font-size: 0.8rem;
+            margin-bottom: 12px;
+            outline: none;
+        }
+
+        .search-box:focus {
+            border-color: var(--accent-yellow);
+        }
+
+        /* Trade Cards */
+        .trade-card {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 12px;
+            margin-bottom: 10px;
+            position: relative;
+            overflow: hidden;
+            transition: transform 0.15s, border-color 0.2s;
+        }
+
+        .trade-card.win {
+            border-right: 4px solid var(--accent-green);
+        }
+
+        .trade-card.loss {
+            border-right: 4px solid var(--accent-red);
+        }
+
+        .trade-card.active-trade {
+            border-right: 4px solid var(--accent-blue);
+        }
+
+        .card-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .coin-title {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 0.95rem;
+            font-weight: 700;
+        }
+
+        .dir-tag {
+            font-size: 0.68rem;
+            font-weight: 700;
+            padding: 2px 6px;
+            border-radius: 4px;
+        }
+
+        .dir-long {
+            background: rgba(16, 185, 129, 0.2);
+            color: var(--accent-green);
+        }
+
+        .dir-short {
+            background: rgba(239, 68, 68, 0.2);
+            color: var(--accent-red);
+        }
+
+        .status-badge {
+            font-size: 0.7rem;
+            padding: 3px 8px;
+            border-radius: 8px;
+            font-weight: 600;
+        }
+
+        .status-win {
+            background: rgba(16, 185, 129, 0.2);
+            color: var(--accent-green);
+            border: 1px solid rgba(16, 185, 129, 0.4);
+        }
+
+        .status-loss {
+            background: rgba(239, 68, 68, 0.2);
+            color: var(--accent-red);
+            border: 1px solid rgba(239, 68, 68, 0.4);
+        }
+
+        .status-running {
+            background: rgba(59, 130, 246, 0.2);
+            color: var(--accent-blue);
+            border: 1px solid rgba(59, 130, 246, 0.4);
+        }
+
+        .trade-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 6px;
+            background: rgba(0, 0, 0, 0.25);
+            padding: 8px;
+            border-radius: 8px;
+            margin-bottom: 8px;
+        }
+
+        .grid-cell {
+            text-align: center;
+        }
+
+        .cell-lbl {
+            font-size: 0.62rem;
+            color: var(--text-secondary);
+            margin-bottom: 2px;
+        }
+
+        .cell-val {
+            font-size: 0.78rem;
+            font-weight: 700;
+            font-family: monospace;
+        }
+
+        .timeline-box {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px;
+            margin-top: 6px;
+        }
+
+        .timeline-tag {
+            background: rgba(255, 255, 255, 0.05);
+            font-size: 0.64rem;
+            color: var(--text-secondary);
+            padding: 2px 6px;
+            border-radius: 4px;
+        }
+
+        .card-footer-time {
+            font-size: 0.65rem;
+            color: var(--text-secondary);
+            margin-top: 6px;
+            text-align: left;
+            direction: ltr;
+        }
+
+        /* Bottom Nav */
+        .bottom-nav {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 65px;
+            background: rgba(22, 27, 34, 0.95);
+            backdrop-filter: blur(10px);
+            border-top: 1px solid var(--border-color);
+            display: flex;
+            justify-content: space-around;
+            align-items: center;
+            z-index: 100;
+        }
+
+        .nav-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 3px;
+            color: var(--text-secondary);
+            font-size: 0.68rem;
+            cursor: pointer;
+            transition: color 0.2s;
+            flex: 1;
+        }
+
+        .nav-item.active {
+            color: var(--accent-yellow);
+        }
+
+        .nav-icon {
+            font-size: 1.25rem;
+        }
+
+        /* 30 Coins Table */
+        .coins-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .coin-row {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            padding: 10px 12px;
+            border-radius: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .coin-left {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .coin-rank {
+            font-size: 0.72rem;
+            color: var(--text-secondary);
+            width: 18px;
+        }
+
+        .coin-symbol {
+            font-weight: 700;
+            font-size: 0.88rem;
+        }
+
+        .coin-right {
+            text-align: left;
+        }
+
+        .coin-price {
+            font-size: 0.85rem;
+            font-weight: 700;
+            font-family: monospace;
+        }
+
+        .coin-status {
+            font-size: 0.68rem;
+            padding: 2px 6px;
+            border-radius: 4px;
+            margin-top: 2px;
+            display: inline-block;
+        }
+
+        .status-ready { background: rgba(16, 185, 129, 0.2); color: var(--accent-green); }
+        .status-forming { background: rgba(59, 130, 246, 0.2); color: var(--accent-blue); }
+        .status-idle { background: rgba(139, 148, 158, 0.15); color: var(--text-secondary); }
+
+        /* Calculator Card */
+        .calculator-card {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 16px;
+        }
+
+        .form-group {
+            margin-bottom: 12px;
+        }
+
+        .form-group label {
+            display: block;
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            margin-bottom: 4px;
+        }
+
+        .form-group input {
+            width: 100%;
+            background: var(--bg-color);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            padding: 10px 12px;
+            border-radius: 8px;
+            font-size: 0.88rem;
+            outline: none;
+        }
+
+        .calc-result {
+            margin-top: 16px;
+            padding-top: 14px;
+            border-top: 1px dashed var(--border-color);
+        }
+
+        .calc-row {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.8rem;
+            margin-bottom: 8px;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 40px 16px;
+            color: var(--text-secondary);
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Header -->
+    <header>
+        <div class="header-left">
+            <img src="avatar.jpg" alt="NDS Avatar" class="header-avatar" onerror="this.style.display='none'">
+            <div>
+                <div class="app-title">NDS 1.2 Futures Bot</div>
+                <div class="app-subtitle">دیده‌بان فیوچرز و رهگیر سود ۳۰ ارز</div>
+            </div>
+        </div>
+        <div class="live-badge">
+            <span class="pulse-dot"></span>
+            <span>آنلاین</span>
+        </div>
+    </header>
+
+    <!-- Navigation Tabs -->
+    <div class="tabs-nav">
+        <button class="tab-btn active" onclick="switchTab('trades')">📈 کارنامه زنده (/trades)</button>
+        <button class="tab-btn" onclick="switchTab('setups')">🎯 ستاپ‌های جدید</button>
+        <button class="tab-btn" onclick="switchTab('all-coins')">📊 جدول ۳۰ ارز</button>
+        <button class="tab-btn" onclick="switchTab('calculator')">🧮 مدیریت ریسک</button>
+    </div>
+
+    <!-- VIEW 1: TRADES (Default Tab for /trades) -->
+    <div id="view-trades">
+        <!-- Stats Summary Grid -->
+        <div class="stats-grid">
+            <div class="stat-card" style="border-color: rgba(16, 185, 129, 0.4);">
+                <div class="stat-val" style="color: #10b981;" id="stat-winrate">--%</div>
+                <div class="stat-lbl">وین‌ریت (Win Rate)</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-val" style="color: #f59e0b;" id="stat-total">--</div>
+                <div class="stat-lbl">کل معاملات</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-val" style="color: #10b981;" id="stat-wins">--</div>
+                <div class="stat-lbl">تارگت‌خورده (TP)</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-val" style="color: #ef4444;" id="stat-losses">--</div>
+                <div class="stat-lbl">استاپ‌خورده (SL)</div>
+            </div>
+        </div>
+
+        <!-- Filter Controls -->
+        <div class="filter-row">
+            <div class="filter-chips">
+                <button class="chip active" onclick="filterTradeCards('all', this)">همه (<span id="count-all">0</span>)</button>
+                <button class="chip" onclick="filterTradeCards('active', this)">⏳ باز (<span id="count-active">0</span>)</button>
+                <button class="chip" onclick="filterTradeCards('win', this)">🎯 سودده (<span id="count-win">0</span>)</button>
+                <button class="chip" onclick="filterTradeCards('loss', this)">🛑 استاپ (<span id="count-loss">0</span>)</button>
+            </div>
+            <button class="refresh-btn" onclick="loadLiveTrades()">
+                <span>🔄</span>
+                <span>بروزرسانی</span>
+            </button>
+        </div>
+
+        <!-- Search Bar -->
+        <input type="text" class="search-box" id="trade-search" placeholder="🔍 جستجوی نماد (مثلا BTC, SOL, ETH)..." oninput="searchTrades()">
+
+        <!-- Trade Cards Container -->
+        <div id="trades-container">
+            <div class="empty-state">
+                <div style="font-size: 2rem; margin-bottom: 8px;">⏳</div>
+                <div>در حال اتصال به سرور و بارگذاری کارنامه زنده...</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- VIEW 2: SETUPS -->
+    <div id="view-setups" style="display: none;">
+        <div class="trade-card win" style="border-right-color: #10b981; margin-bottom: 12px;">
+            <div class="card-top">
+                <div class="coin-title">
+                    <span>BTC/USDT</span>
+                    <span class="dir-tag dir-long">LONG</span>
+                </div>
+                <span class="status-badge status-win">R/R 1:11.6</span>
+            </div>
+            <div class="trade-grid">
+                <div class="grid-cell">
+                    <div class="cell-lbl">ورود (Entry)</div>
+                    <div class="cell-val">64,653.30</div>
+                </div>
+                <div class="grid-cell">
+                    <div class="cell-lbl">حد ضرر (SL)</div>
+                    <div class="cell-val" style="color: var(--accent-red);">64,458.35</div>
+                </div>
+                <div class="grid-cell">
+                    <div class="cell-lbl">تارگت ۱ (TP1)</div>
+                    <div class="cell-val" style="color: var(--accent-green);">65,781.60</div>
+                </div>
+            </div>
+            <div style="font-size: 0.72rem; color: var(--text-secondary);">
+                استراتژی: ستاپ 123Flag | هوک ۸۶.۴٪: 66,240 $
+            </div>
+        </div>
+
+        <div class="trade-card win" style="border-right-color: #10b981; margin-bottom: 12px;">
+            <div class="card-top">
+                <div class="coin-title">
+                    <span>SOL/USDT</span>
+                    <span class="dir-tag dir-long">LONG</span>
+                </div>
+                <span class="status-badge status-win">R/R 1:10.5</span>
+            </div>
+            <div class="trade-grid">
+                <div class="grid-cell">
+                    <div class="cell-lbl">ورود (Entry)</div>
+                    <div class="cell-val">70.80</div>
+                </div>
+                <div class="grid-cell">
+                    <div class="cell-lbl">حد ضرر (SL)</div>
+                    <div class="cell-val" style="color: var(--accent-red);">70.33</div>
+                </div>
+                <div class="grid-cell">
+                    <div class="cell-lbl">تارگت ۱ (TP1)</div>
+                    <div class="cell-val" style="color: var(--accent-green);">73.24</div>
+                </div>
+            </div>
+            <div style="font-size: 0.72rem; color: var(--text-secondary);">
+                استراتژی: ستاپ 123Flag | نود اسپایک F فعال
+            </div>
+        </div>
+    </div>
+
+    <!-- VIEW 3: 30 COINS -->
+    <div id="view-all-coins" style="display: none;">
+        <div class="coins-list" id="coins-container"></div>
+    </div>
+
+    <!-- VIEW 4: CALCULATOR -->
+    <div id="view-calculator" style="display: none;">
+        <div class="calculator-card">
+            <h3 style="font-size: 0.95rem; margin-bottom: 8px; color: var(--accent-yellow);">ماشین‌حساب مدیریت سرمایه NDS</h3>
+            <p style="font-size: 0.72rem; color: var(--text-secondary); margin-bottom: 14px;">
+                فرمول صفحه ۱۲۲: حجم ورود با ریسک مشخص بر مبنای فاصله ورود تا استاپ.
+            </p>
+            <div class="form-group">
+                <label>کل سرمایه حساب ($):</label>
+                <input type="number" id="calc-balance" value="1000" oninput="calculatePosition()">
+            </div>
+            <div class="form-group">
+                <label>درصد ریسک مجاز (%):</label>
+                <input type="number" id="calc-risk-pct" value="2" step="0.5" oninput="calculatePosition()">
+            </div>
+            <div class="form-group">
+                <label>قیمت ورود (Entry):</label>
+                <input type="number" id="calc-entry" value="65000" oninput="calculatePosition()">
+            </div>
+            <div class="form-group">
+                <label>قیمت حد ضرر (Stop Loss):</label>
+                <input type="number" id="calc-sl" value="64700" oninput="calculatePosition()">
+            </div>
+
+            <div class="calc-result">
+                <div class="calc-row">
+                    <span>مبلغ در معرض ریسک:</span>
+                    <span id="res-risk-usd" style="color: var(--accent-red); font-weight: 700;">20.00 $</span>
+                </div>
+                <div class="calc-row">
+                    <span>فاصله استاپ لاس:</span>
+                    <span id="res-sl-dist">300.00 دلار</span>
+                </div>
+                <div class="calc-row">
+                    <span>حجم پیشنهادی معامله:</span>
+                    <span id="res-lot-size" style="color: var(--accent-green); font-weight: 700;">0.067 واحد</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bottom Navigation -->
+    <div class="bottom-nav">
+        <div class="nav-item active" onclick="switchTab('trades')">
+            <span class="nav-icon">📈</span>
+            <span>کارنامه</span>
+        </div>
+        <div class="nav-item" onclick="switchTab('setups')">
+            <span class="nav-icon">🎯</span>
+            <span>ستاپ‌ها</span>
+        </div>
+        <div class="nav-item" onclick="switchTab('all-coins')">
+            <span class="nav-icon">📊</span>
+            <span>۳۰ ارز</span>
+        </div>
+        <div class="nav-item" onclick="switchTab('calculator')">
+            <span class="nav-icon">🧮</span>
+            <span>ریسک</span>
+        </div>
+    </div>
+
+    <script>
+        // Init Telegram WebApp
+        if (window.Telegram && window.Telegram.WebApp) {
+            window.Telegram.WebApp.ready();
+            window.Telegram.WebApp.expand();
+        }
+
+        const API_ENDPOINT = 'https://nds-telegram-bot.onrender.com';
+        let allTradesList = [];
+        let currentFilter = 'all';
+
+        async function loadLiveTrades() {
+            const container = document.getElementById('trades-container');
+            
+            try {
+                const resp = await fetch(API_ENDPOINT, { cache: 'no-cache' });
+                if (!resp.ok) throw new Error('HTTP ' + resp.status);
+                const data = await resp.json();
+                
+                // Cache locally
+                localStorage.setItem('nds_live_trades_cache', JSON.stringify(data));
+                processTradesData(data);
+            } catch (err) {
+                console.warn('Network fetch failed, loading from cache...', err);
+                const cached = localStorage.getItem('nds_live_trades_cache');
+                if (cached) {
+                    processTradesData(JSON.parse(cached));
+                } else {
+                    container.innerHTML = `
+                        <div class="empty-state">
+                            <div style="color: var(--accent-red); font-size: 1.5rem; margin-bottom: 6px;">⚠️</div>
+                            <div>خطا در برقراری ارتباط با سرور کلود</div>
+                            <button class="refresh-btn" style="margin: 10px auto;" onclick="loadLiveTrades()">تلاش مجدد</button>
+                        </div>
+                    `;
+                }
+            }
+        }
+
+        function processTradesData(data) {
+            const tradesObj = data.trades || {};
+            allTradesList = Object.values(tradesObj).reverse(); // latest first
+
+            const summary = data.summary || {};
+            const total = summary.total_trades || allTradesList.length;
+            const wins = summary.tp_hit_count || allTradesList.filter(t => t.tp1_hit || t.tp2_hit || t.tp3_hit).length;
+            const losses = summary.sl_hit_count || allTradesList.filter(t => t.sl_hit).length;
+            const active = summary.active_count || allTradesList.filter(t => !t.is_closed).length;
+            const winrate = (wins + losses > 0) ? ((wins / (wins + losses)) * 100).toFixed(1) : '0';
+
+            // Update stats
+            document.getElementById('stat-winrate').innerText = winrate + '%';
+            document.getElementById('stat-total').innerText = total;
+            document.getElementById('stat-wins').innerText = wins;
+            document.getElementById('stat-losses').innerText = losses;
+
+            document.getElementById('count-all').innerText = total;
+            document.getElementById('count-active').innerText = active;
+            document.getElementById('count-win').innerText = wins;
+            document.getElementById('count-loss').innerText = losses;
+
+            renderTradesCards();
+        }
+
+        function renderTradesCards() {
+            const container = document.getElementById('trades-container');
+            const searchVal = document.getElementById('trade-search').value.trim().toUpperCase();
+
+            let filtered = allTradesList;
+
+            // Apply filter chip
+            if (currentFilter === 'active') {
+                filtered = filtered.filter(t => !t.is_closed);
+            } else if (currentFilter === 'win') {
+                filtered = filtered.filter(t => t.tp1_hit || t.tp2_hit || t.tp3_hit);
+            } else if (currentFilter === 'loss') {
+                filtered = filtered.filter(t => t.sl_hit);
+            }
+
+            // Apply search
+            if (searchVal) {
+                filtered = filtered.filter(t => (t.symbol || '').toUpperCase().includes(searchVal));
+            }
+
+            if (!filtered || filtered.length === 0) {
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <div>هیچ معامله‌ای با این فیلتر یافت نشد.</div>
+                    </div>
+                `;
+                return;
+            }
+
+            container.innerHTML = filtered.map(t => {
+                const isLong = t.direction === 'LONG';
+                const dirClass = isLong ? 'dir-long' : 'dir-short';
+                
+                let cardClass = 'active-trade';
+                let statusBadge = '<span class="status-badge status-running">⏳ در جریان</span>';
+
+                if (t.tp3_hit) {
+                    cardClass = 'win';
+                    statusBadge = '<span class="status-badge status-win">🏆 تارگت ۳ (طلایی) ✅</span>';
+                } else if (t.tp2_hit) {
+                    cardClass = 'win';
+                    statusBadge = '<span class="status-badge status-win">🎯 تارگت ۲ تاچ شد ✅</span>';
+                } else if (t.tp1_hit) {
+                    cardClass = 'win';
+                    statusBadge = '<span class="status-badge status-win">🎯 تارگت ۱ تاچ شد ✅</span>';
+                } else if (t.close_reason === 'RISK_FREE') {
+                    cardClass = 'win';
+                    statusBadge = '<span class="status-badge status-win">🛡 خروج سربه‌سر (ریسک‌فری)</span>';
+                } else if (t.sl_hit) {
+                    cardClass = 'loss';
+                    statusBadge = '<span class="status-badge status-loss">🛑 استاپ لاس فعال شد</span>';
+                }
+
+                const historyItems = (t.history || []).map(h => `<span class="timeline-tag">${h}</span>`).join('');
+
+                const sym = (t.symbol || '').replace('USD', '/USDT');
+                const entry = Number(t.entry || 0).toLocaleString(undefined, { maximumFractionDigits: 4 });
+                const sl = Number(t.sl || 0).toLocaleString(undefined, { maximumFractionDigits: 4 });
+                const tp1 = Number(t.tp1 || 0).toLocaleString(undefined, { maximumFractionDigits: 4 });
+
+                return `
+                    <div class="trade-card ${cardClass}">
+                        <div class="card-top">
+                            <div class="coin-title">
+                                <span>${sym}</span>
+                                <span class="dir-tag ${dirClass}">${t.direction}</span>
+                            </div>
+                            ${statusBadge}
+                        </div>
+                        <div class="trade-grid">
+                            <div class="grid-cell">
+                                <div class="cell-lbl">ورود (Entry)</div>
+                                <div class="cell-val">${entry}</div>
+                            </div>
+                            <div class="grid-cell">
+                                <div class="cell-lbl">حد ضرر (SL)</div>
+                                <div class="cell-val" style="color: var(--accent-red);">${sl}</div>
+                            </div>
+                            <div class="grid-cell">
+                                <div class="cell-lbl">تارگت ۱ (TP1)</div>
+                                <div class="cell-val" style="color: var(--accent-green);">${tp1}</div>
+                            </div>
+                        </div>
+                        ${historyItems ? `<div class="timeline-box">${historyItems}</div>` : ''}
+                        <div class="card-footer-time">${t.created_at || ''}</div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function filterTradeCards(type, el) {
+            currentFilter = type;
+            document.querySelectorAll('.chip').forEach(c => c.classList.remove('active'));
+            if (el) el.classList.add('active');
+            renderTradesCards();
+        }
+
+        function searchTrades() {
+            renderTradesCards();
+        }
+
+        // Tab Switching Logic
+        function switchTab(tab) {
+            document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+            document.querySelectorAll('.nav-item').forEach(btn => btn.classList.remove('active'));
+
+            document.getElementById('view-trades').style.display = 'none';
+            document.getElementById('view-setups').style.display = 'none';
+            document.getElementById('view-all-coins').style.display = 'none';
+            document.getElementById('view-calculator').style.display = 'none';
+
+            const tabMap = {
+                'trades': 0,
+                'setups': 1,
+                'all-coins': 2,
+                'calculator': 3
+            };
+
+            const idx = tabMap[tab] || 0;
+            document.querySelectorAll('.tab-btn')[idx].classList.add('active');
+            document.querySelectorAll('.nav-item')[idx].classList.add('active');
+
+            const viewEl = document.getElementById('view-' + tab);
+            if (viewEl) viewEl.style.display = 'block';
+
+            if (tab === 'trades') {
+                loadLiveTrades();
+            } else if (tab === 'all-coins') {
+                renderCoinsList();
+            } else if (tab === 'calculator') {
+                calculatePosition();
+            }
+        }
+
+        // 30 Coins Data
+        const TOP_30_COINS = [
+            { symbol: 'BTC', name: 'Bitcoin', price: 64980, status: 'ready', statusText: 'ستاپ آماده 123Flag' },
+            { symbol: 'ETH', name: 'Ethereum', price: 1826.5, status: 'forming', statusText: 'تشکیل نود ۲' },
+            { symbol: 'SOL', name: 'Solana', price: 71.4, status: 'ready', statusText: 'ستاپ آماده 123Flag' },
+            { symbol: 'XRP', name: 'Ripple', price: 0.961, status: 'idle', statusText: 'موج تعادل' },
+            { symbol: 'DOGE', name: 'Dogecoin', price: 0.0589, status: 'idle', statusText: 'سایکل خنثی' },
+            { symbol: 'SUI', name: 'Sui', price: 0.728, status: 'forming', statusText: 'در حال ثبت نود ۳' },
+            { symbol: 'ADA', name: 'Cardano', price: 0.1546, status: 'idle', statusText: 'موج رالی' },
+            { symbol: 'NEAR', name: 'Near Protocol', price: 3.185, status: 'ready', statusText: 'ستاپ آماده 123Flag' },
+            { symbol: 'TAO', name: 'Bittensor', price: 192.7, status: 'forming', statusText: 'تکمیل نود ۲' },
+            { symbol: 'LINK', name: 'Chainlink', price: 9.24, status: 'idle', statusText: 'پولبک به هوک' },
+            { symbol: 'XLM', name: 'Stellar', price: 0.139, status: 'idle', statusText: 'سایکل خنثی' },
+            { symbol: 'XMR', name: 'Monero', price: 500.7, status: 'forming', statusText: 'اسپایک نود F' },
+            { symbol: 'INJ', name: 'Injective', price: 6.93, status: 'forming', statusText: 'در حال ثبت نود ۳' },
+            { symbol: 'AVAX', name: 'Avalanche', price: 7.28, status: 'idle', statusText: 'حرکت به تراز ۸۶٪' },
+            { symbol: 'LTC', name: 'Litecoin', price: 45.35, status: 'idle', statusText: 'نود باز دره' },
+            { symbol: 'QNT', name: 'Quant', price: 156.8, status: 'forming', statusText: 'تکمیل نود ۱' },
+            { symbol: 'UNI', name: 'Uniswap', price: 5.18, status: 'idle', statusText: 'حرکت در تعادل' },
+            { symbol: 'DOT', name: 'Polkadot', price: 3.82, status: 'forming', statusText: 'تشکیل نود ۲' },
+            { symbol: 'APT', name: 'Aptos', price: 5.12, status: 'idle', statusText: 'سایکل خنثی' },
+            { symbol: 'PEPE', name: 'Pepe', price: 0.0000085, status: 'forming', statusText: 'اسپایک نود F' },
+            { symbol: 'SHIB', name: 'Shiba Inu', price: 0.000012, status: 'idle', statusText: 'سایکل خنثی' },
+            { symbol: 'TIA', name: 'Celestia', price: 4.85, status: 'ready', statusText: 'ستاپ آماده' },
+            { symbol: 'RENDER', name: 'Render', price: 4.35, status: 'idle', statusText: 'حرکت تعادلی' },
+            { symbol: 'FET', name: 'Artificial Superintelligence', price: 1.15, status: 'forming', statusText: 'تکمیل نود ۳' },
+            { symbol: 'ICP', name: 'Internet Computer', price: 7.65, status: 'idle', statusText: 'نود باز سقف' },
+            { symbol: 'ARB', name: 'Arbitrum', price: 0.485, status: 'idle', statusText: 'سایکل خنثی' },
+            { symbol: 'OP', name: 'Optimism', price: 1.25, status: 'forming', statusText: 'تشکیل نود ۲' },
+            { symbol: 'KAS', name: 'Kaspa', price: 0.118, status: 'idle', statusText: 'حرکت رالی' },
+            { symbol: 'AAVE', name: 'Aave', price: 135.4, status: 'ready', statusText: 'ستاپ آماده' },
+            { symbol: 'FIL', name: 'Filecoin', price: 3.42, status: 'idle', statusText: 'سایکل خنثی' }
+        ];
+
+        function renderCoinsList() {
+            const container = document.getElementById('coins-container');
+            container.innerHTML = TOP_30_COINS.map((c, idx) => `
+                <div class="coin-row">
+                    <div class="coin-left">
+                        <span class="coin-rank">${idx + 1}</span>
+                        <div>
+                            <div class="coin-symbol">${c.symbol}/USDT</div>
+                            <div style="font-size: 0.7rem; color: var(--text-secondary);">${c.name}</div>
+                        </div>
+                    </div>
+                    <div class="coin-right">
+                        <div class="coin-price">${c.price > 1 ? c.price.toLocaleString() : c.price} $</div>
+                        <span class="coin-status ${c.status === 'ready' ? 'status-ready' : (c.status === 'forming' ? 'status-forming' : 'status-idle')}">
+                            ${c.statusText}
+                        </span>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function calculatePosition() {
+            const balance = parseFloat(document.getElementById('calc-balance').value) || 0;
+            const riskPct = parseFloat(document.getElementById('calc-risk-pct').value) || 0;
+            const entry = parseFloat(document.getElementById('calc-entry').value) || 0;
+            const sl = parseFloat(document.getElementById('calc-sl').value) || 0;
+
+            const riskUsd = balance * (riskPct / 100);
+            const slDist = Math.abs(entry - sl);
+
+            document.getElementById('res-risk-usd').innerText = riskUsd.toFixed(2) + ' $';
+            document.getElementById('res-sl-dist').innerText = slDist.toFixed(2) + ' دلار';
+
+            if (slDist > 0) {
+                const units = riskUsd / slDist;
+                document.getElementById('res-lot-size').innerText = units.toFixed(4) + ' واحد';
+            } else {
+                document.getElementById('res-lot-size').innerText = '۰';
+            }
+        }
+
+        // Auto load on start
+        loadLiveTrades();
+        setInterval(loadLiveTrades, 20000); // 20s auto refresh
+    </script>
+</body>
+</html>
