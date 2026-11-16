@@ -456,6 +456,91 @@ class PositionTracker:
         lines.append(f"📱 <i>برای مشاهده آرشیو کامل دکمه زیر را لمس کنید.</i>")
         return "\n".join(lines)
 
+    def get_pnl_report(self, capital: float = 100.0, leverage: float = 3.0) -> str:
+        """Daily, weekly and monthly PnL simulation based on $100 capital and 3x leverage"""
+        daily_pnl = {}
+        wins = 0
+        losses = 0
+        total_pnl = 0.0
+
+        for t in self.trades.values():
+            if not t.get("is_closed") and not t.get("tp1_hit"):
+                continue
+
+            created = t.get("created_at", "")
+            date_key = created.split()[0] if created else "امروز"
+
+            entry = float(t.get("entry", 1.0))
+            sl = float(t.get("sl", entry))
+            tp1 = float(t.get("tp1", entry))
+            tp2 = float(t.get("tp2", entry))
+            tp3 = float(t.get("tp3", entry))
+
+            trade_ret = 0.0
+            is_win = False
+
+            if t.get("tp3_hit"):
+                trade_ret = abs(tp3 - entry) / entry
+                is_win = True
+            elif t.get("tp2_hit"):
+                trade_ret = abs(tp2 - entry) / entry
+                is_win = True
+            elif t.get("tp1_hit"):
+                trade_ret = abs(tp1 - entry) / entry
+                is_win = True
+            elif t.get("close_reason") == "RISK_FREE":
+                trade_ret = 0.0
+                is_win = True
+            elif t.get("sl_hit"):
+                trade_ret = -(abs(sl - entry) / entry)
+                is_win = False
+
+            # Model: 10% margin per trade ($10 margin) with 3x leverage
+            margin_per_trade = capital * 0.10
+            pnl_usd = margin_per_trade * (trade_ret * leverage)
+
+            if date_key not in daily_pnl:
+                daily_pnl[date_key] = {"trades": 0, "wins": 0, "losses": 0, "usd": 0.0}
+
+            daily_pnl[date_key]["trades"] += 1
+            if is_win:
+                daily_pnl[date_key]["wins"] += 1
+                wins += 1
+            else:
+                daily_pnl[date_key]["losses"] += 1
+                losses += 1
+
+            daily_pnl[date_key]["usd"] += pnl_usd
+            total_pnl += pnl_usd
+
+        total_trades = wins + losses
+        win_rate = (wins / total_trades * 100) if total_trades > 0 else 0
+        growth_pct = (total_pnl / capital) * 100
+        weekly_proj = total_pnl * 7
+        monthly_proj = total_pnl * 30
+
+        lines = [
+            f"💰 <b>کارنامه تجمیعی سودآوری (سرمایه ۱۰۰$ | اهرم ۳x)</b>",
+            "━━━━━━━━━━━━━━━━━━",
+            f"📈 <b>وین‌ریت کل معاملات:</b> <code>{win_rate:.1f}%</code> ({wins} برد / {losses} باخت)",
+            f"💵 <b>سود خالص ۲۴ ساعت اخیر:</b> <code>{total_pnl:+.2f} $</code> (<b>{growth_pct:+.1f}%</b>)",
+            "━━━━━━━━━━━━━━━━━━",
+            "📅 <b>برایند سود به تفکیک روز:</b>"
+        ]
+
+        for d, s in daily_pnl.items():
+            day_growth = (s['usd'] / capital) * 100
+            lines.append(f"• <b>{d}:</b> {s['trades']} معامله ({s['wins']} برد/{s['losses']} باخت) | سود: <code>{s['usd']:+.2f} $</code> ({day_growth:+.1f}%)")
+
+        lines.extend([
+            "\n🚀 <b>برآورد برآیند هفتگی و ماهانه:</b>",
+            f"▫️ <b>هفتگی (۷ روز):</b> حدود <code>{weekly_proj:+.2f} $</code> سود خالص (رشد <b>{weekly_proj:.1f}%</b>)",
+            f"▫️ <b>ماهانه (۳۰ روز):</b> حدود <code>{monthly_proj:+.2f} $</code> سود خالص (رشد <b>{monthly_proj:.1f}%</b>)",
+            "\n<i>💡 مبنای محاسبه: مدیریت ریسک استاندارد (۱۰$ مارجین در هر پوزیشن) با اهرم ۳ و سطوح واقعی خروج NDS.</i>"
+        ])
+
+        return "\n".join(lines)
+
 
 class NDSScannerBot:
     def __init__(self, config: dict = None):
@@ -503,7 +588,10 @@ class NDSScannerBot:
                                 # Auto subscribe user
                                 add_subscriber(chat_id)
 
-                                if cmd in ["/trades", "/status", "/report", "/tp", "/sl", "وضعیت", "معاملات", "گزارش", "کارنامه"]:
+                                if cmd in ["/pnl", "/daily", "/weekly", "/profit", "سود", "برایند", "هفتگی", "ماهانه"]:
+                                    pnl_rep = self.tracker.get_pnl_report()
+                                    self.notifier.send_message(pnl_rep, with_miniapp_button=True, chat_id=chat_id)
+                                elif cmd in ["/trades", "/status", "/report", "/tp", "/sl", "وضعیت", "معاملات", "گزارش", "کارنامه"]:
                                     report = self.tracker.get_summary_report()
                                     self.notifier.send_message(report, with_miniapp_button=True, chat_id=chat_id)
                                 elif cmd in ["/start", "/help", "شروع", "راهنما"]:
