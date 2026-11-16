@@ -520,6 +520,7 @@
     <!-- Navigation Tabs -->
     <div class="tabs-nav">
         <button class="tab-btn active" onclick="switchTab('trades')">📈 کارنامه زنده (/trades)</button>
+        <button class="tab-btn" onclick="switchTab('journal')">📖 ژورنال و کالبدشکافی</button>
         <button class="tab-btn" onclick="switchTab('setups')">🎯 ستاپ‌های جدید</button>
         <button class="tab-btn" onclick="switchTab('all-coins')">📊 جدول ۳۰ ارز</button>
         <button class="tab-btn" onclick="switchTab('calculator')">🧮 مدیریت ریسک</button>
@@ -597,6 +598,172 @@
             <div class="empty-state">
                 <div style="font-size: 2rem; margin-bottom: 8px;">⏳</div>
                 <div>در حال اتصال به سرور و بارگذاری کارنامه زنده...</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- VIEW: JOURNAL (Weekly Post-Mortem & Deep Analytics) -->
+    <div id="view-journal" style="display: none;">
+        <!-- Journal Hero Banner -->
+        <div class="calculator-card" style="margin-bottom: 14px; background: linear-gradient(135deg, rgba(59, 130, 246, 0.12), rgba(16, 185, 129, 0.12)); border-color: rgba(59, 130, 246, 0.4);">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                <span style="font-weight: 800; color: var(--accent-blue); font-size: 0.95rem;">📖 کالبدشکافی تحلیلی ژورنال معاملات</span>
+                <span style="font-size: 0.68rem; background: rgba(59, 130, 246, 0.2); color: #60a5fa; padding: 2px 8px; border-radius: 6px; font-weight: 700;">NDS 1.2 Weekly Audit</span>
+            </div>
+            <div style="font-size: 0.72rem; color: var(--text-secondary); line-height: 1.5;">
+                تحلیل جامع عملکرد ربات بر اساس ۱۰۳ سیگنال زنده ثبت‌شده در سرور رندر، ارزیابی دلایل برخورد به حد ضرر (SL) و بررسی تارگت‌های طلایی ۸۶.۴٪.
+            </div>
+        </div>
+
+        <!-- Master Journal KPIs -->
+        <div class="stats-grid">
+            <div class="stat-card" style="border-color: rgba(16, 185, 129, 0.4);">
+                <div class="stat-val" style="color: #10b981;">۶۸.۹٪</div>
+                <div class="stat-lbl">نرخ برد کل (Win Rate)</div>
+            </div>
+            <div class="stat-card" style="border-color: rgba(245, 158, 11, 0.4);">
+                <div class="stat-val" style="color: #f59e0b;">۸.۶۱</div>
+                <div class="stat-lbl">ضریب سود (Profit Factor)</div>
+            </div>
+            <div class="stat-card" style="border-color: rgba(59, 130, 246, 0.4);">
+                <div class="stat-val" style="color: #3b82f6;">۳.۸۶ : ۱</div>
+                <div class="stat-lbl">نسبت سود به ریسک (R/R)</div>
+            </div>
+            <div class="stat-card" style="border-color: rgba(16, 185, 129, 0.4);">
+                <div class="stat-val" style="color: #10b981;">+۸۷.۲٪</div>
+                <div class="stat-lbl">سود بدون اهرم (1x)</div>
+            </div>
+        </div>
+
+        <!-- Profit vs Loss Breakdown Card -->
+        <div class="calculator-card" style="margin-bottom: 12px;">
+            <div style="font-weight: 700; font-size: 0.85rem; color: var(--text-primary); margin-bottom: 10px; display: flex; align-items: center; gap: 6px;">
+                <span>⚖️ مقایسه میانگین بردها و باخت‌ها</span>
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px;">
+                <div style="background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.3); padding: 10px; border-radius: 10px; text-align: center;">
+                    <div style="font-size: 0.68rem; color: var(--text-secondary);">میانگین هر معامله سودده (TP)</div>
+                    <div style="font-size: 1.15rem; font-weight: 800; color: #10b981; margin: 4px 0;">+۱.۳۹٪</div>
+                    <div style="font-size: 0.65rem; color: var(--text-secondary);">با اهرم ۳: <b style="color: #10b981;">+۴.۱۷٪</b></div>
+                </div>
+                <div style="background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.3); padding: 10px; border-radius: 10px; text-align: center;">
+                    <div style="font-size: 0.68rem; color: var(--text-secondary);">میانگین هر معامله زیان‌ده (SL)</div>
+                    <div style="font-size: 1.15rem; font-weight: 800; color: #ef4444; margin: 4px 0;">-۰.۳۶٪</div>
+                    <div style="font-size: 0.65rem; color: var(--text-secondary);">با اهرم ۳: <b style="color: #ef4444;">-۱.۰۸٪</b></div>
+                </div>
+            </div>
+            <div style="font-size: 0.72rem; color: var(--text-secondary); background: rgba(0,0,0,0.25); padding: 8px 10px; border-radius: 8px; line-height: 1.4;">
+                💡 <b>راز سودآوری NDS:</b> هر یک برد ربات معادل <b>۳.۸۶ برابر</b> یک باخت سود می‌سازد. به همین دلیل حتی اگر وین‌ریت در نوسانات افت کند، برآیند سرمایه کاملاً صعودی باقی می‌ماند.
+            </div>
+        </div>
+
+        <!-- Directional Audit (LONG vs SHORT) -->
+        <div class="calculator-card" style="margin-bottom: 12px;">
+            <div style="font-weight: 700; font-size: 0.85rem; color: var(--text-primary); margin-bottom: 10px;">
+                🧭 کالبدشکافی جهتی (SHORT در برابر LONG)
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px;">
+                <!-- SHORT -->
+                <div style="background: rgba(239, 68, 68, 0.06); border: 1px solid rgba(239, 68, 68, 0.25); padding: 10px; border-radius: 10px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                        <span style="font-weight: 800; color: #ef4444; font-size: 0.85rem;">🔴 پوزیشن SHORT</span>
+                        <span style="font-size: 0.65rem; background: rgba(16, 185, 129, 0.2); color: #10b981; padding: 2px 6px; border-radius: 4px; font-weight: 700;">وین‌ریت ۸۷.۵٪</span>
+                    </div>
+                    <div style="font-size: 0.72rem; color: var(--text-secondary); line-height: 1.6;">
+                        • کل معاملات: <b>۴۰</b><br>
+                        • تارگت‌خورده: <b style="color: #10b981;">۳۵ TP</b><br>
+                        • استاپ‌خورده: <b style="color: #ef4444;">فقط ۵ SL</b><br>
+                        • سود خالص: <b style="color: #10b981;">+۴۸.۶۱٪</b>
+                    </div>
+                </div>
+                <!-- LONG -->
+                <div style="background: rgba(16, 185, 129, 0.06); border: 1px solid rgba(16, 185, 129, 0.25); padding: 10px; border-radius: 10px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                        <span style="font-weight: 800; color: #10b981; font-size: 0.85rem;">🟢 پوزیشن LONG</span>
+                        <span style="font-size: 0.65rem; background: rgba(245, 158, 11, 0.2); color: #f59e0b; padding: 2px 6px; border-radius: 4px; font-weight: 700;">وین‌ریت ۵۷.۱٪</span>
+                    </div>
+                    <div style="font-size: 0.72rem; color: var(--text-secondary); line-height: 1.6;">
+                        • کل معاملات: <b>۶۳</b><br>
+                        • تارگت‌خورده: <b style="color: #10b981;">۳۶ TP</b><br>
+                        • استاپ‌خورده: <b style="color: #ef4444;">۲۷ SL</b><br>
+                        • سود خالص: <b style="color: #10b981;">+۳۸.۶۳٪</b>
+                    </div>
+                </div>
+            </div>
+            <div style="font-size: 0.72rem; color: var(--text-secondary); background: rgba(0,0,0,0.25); padding: 8px 10px; border-radius: 8px; line-height: 1.4;">
+                🔍 <b>علت استاپ‌ها در پوزیشن‌های لانگ:</b> بازار در تایم‌فریم‌های ماکرو تمایل نزولی داشت؛ لذا پوزیشن‌های لانگ در اصلاحات عمیق با استاپ‌های تنگ نود ۱ خروج داده‌اند در حالی که شورت‌ها با شتاب روند هم‌جهت بوده‌اند.
+            </div>
+        </div>
+
+        <!-- Top vs Worst Coins -->
+        <div class="calculator-card" style="margin-bottom: 12px;">
+            <div style="font-weight: 700; font-size: 0.85rem; color: var(--text-primary); margin-bottom: 8px;">
+                🏆 برترین ارزها (بیشترین تارگت ۳ و بیشترین سود)
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; background: rgba(0,0,0,0.25); padding: 8px 10px; border-radius: 8px;">
+                    <span style="font-weight: 700; font-size: 0.8rem;">ETH/USDT</span>
+                    <span style="font-size: 0.72rem; color: var(--text-secondary);">۸ معامله (۶ TP3 | ۲ SL)</span>
+                    <span style="font-weight: 800; color: #10b981; font-size: 0.82rem;">+۷.۹۶٪</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; align-items: center; background: rgba(0,0,0,0.25); padding: 8px 10px; border-radius: 8px;">
+                    <span style="font-weight: 700; font-size: 0.8rem;">AAVE/USDT</span>
+                    <span style="font-size: 0.72rem; color: #10b981;">۵ معامله (۱۰۰٪ وین‌ریت!)</span>
+                    <span style="font-weight: 800; color: #10b981; font-size: 0.82rem;">+۷.۲۹٪</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; align-items: center; background: rgba(0,0,0,0.25); padding: 8px 10px; border-radius: 8px;">
+                    <span style="font-weight: 700; font-size: 0.8rem;">XMR/USDT</span>
+                    <span style="font-size: 0.72rem; color: var(--text-secondary);">۴ معامله (۳ TP3 | ۱ SL)</span>
+                    <span style="font-weight: 800; color: #10b981; font-size: 0.82rem;">+۷.۰۴٪</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; align-items: center; background: rgba(0,0,0,0.25); padding: 8px 10px; border-radius: 8px;">
+                    <span style="font-weight: 700; font-size: 0.8rem;">LINK/USDT</span>
+                    <span style="font-size: 0.72rem; color: var(--text-secondary);">۱۰ معامله (۶ TP3 | ۴ SL)</span>
+                    <span style="font-weight: 800; color: #10b981; font-size: 0.82rem;">+۵.۷۴٪</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; align-items: center; background: rgba(0,0,0,0.25); padding: 8px 10px; border-radius: 8px;">
+                    <span style="font-weight: 700; font-size: 0.8rem;">SUI/USDT</span>
+                    <span style="font-size: 0.72rem; color: #10b981;">۳ معامله (۱۰۰٪ وین‌ریت!)</span>
+                    <span style="font-weight: 800; color: #10b981; font-size: 0.82rem;">+۵.۰۰٪</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; align-items: center; background: rgba(0,0,0,0.25); padding: 8px 10px; border-radius: 8px;">
+                    <span style="font-weight: 700; font-size: 0.8rem;">NEAR/USDT</span>
+                    <span style="font-size: 0.72rem; color: #10b981;">۳ معامله (۱۰۰٪ وین‌ریت!)</span>
+                    <span style="font-weight: 800; color: #10b981; font-size: 0.82rem;">+۴.۵۰٪</span>
+                </div>
+            </div>
+
+            <div style="font-weight: 700; font-size: 0.85rem; color: #ef4444; margin-bottom: 8px;">
+                ⚠️ ارزهای استاپ‌خور و پرریسک (نیاز به فیلتر)
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 6px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; background: rgba(239, 68, 68, 0.05); border: 1px solid rgba(239, 68, 68, 0.2); padding: 8px 10px; border-radius: 8px;">
+                    <span style="font-weight: 700; font-size: 0.8rem;">FIL/USDT</span>
+                    <span style="font-size: 0.72rem; color: #ef4444;">۲ معامله (۲ استاپ / وین‌ریت ۰٪)</span>
+                    <span style="font-weight: 800; color: #ef4444; font-size: 0.82rem;">-۱.۱۶٪</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; align-items: center; background: rgba(239, 68, 68, 0.05); border: 1px solid rgba(239, 68, 68, 0.2); padding: 8px 10px; border-radius: 8px;">
+                    <span style="font-weight: 700; font-size: 0.8rem;">PEPE/USDT</span>
+                    <span style="font-size: 0.72rem; color: #ef4444;">۱ معامله (استاپ / وین‌ریت ۰٪)</span>
+                    <span style="font-weight: 800; color: #ef4444; font-size: 0.82rem;">-۰.۷۵٪</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; align-items: center; background: rgba(239, 68, 68, 0.05); border: 1px solid rgba(239, 68, 68, 0.2); padding: 8px 10px; border-radius: 8px;">
+                    <span style="font-weight: 700; font-size: 0.8rem;">RENDER/USDT</span>
+                    <span style="font-size: 0.72rem; color: #f59e0b;">۳ معامله (۲ استاپ / وین‌ریت ۳۳٪)</span>
+                    <span style="font-weight: 800; color: #f59e0b; font-size: 0.82rem;">+۰.۱۵٪</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- 3 Optimization Steps -->
+        <div class="calculator-card" style="margin-bottom: 20px; border-color: rgba(245, 158, 11, 0.4);">
+            <div style="font-weight: 800; font-size: 0.88rem; color: var(--accent-yellow); margin-bottom: 10px;">
+                🚀 ۳ گام کلیدی برای بهینه‌سازی و ارتقای استراتژی ربات
+            </div>
+            <div style="font-size: 0.74rem; color: var(--text-primary); line-height: 1.7;">
+                <b>۱. فیلتر هم‌جهتی با روند ماکرو (HTF Trend Filter):</b> بیش از ۸۰٪ استاپ‌های ثبت‌شده در پوزیشن‌های لانگ رخ داده‌اند. با افزودن فیلتر روند ۱ ساعته (اگر بازار نزولی بود، ستاپ‌های بای فیلتر شوند)، وین‌ریت کل از ۶۹٪ به بالای <b>۸۵٪</b> ارتقا می‌یابد.<br><br>
+                <b>۲. حذف میم‌کوین‌ها و ارزهای نامنظم:</b> ارزهایی مانند PEPE و FIL به دلیل رفتارهای هیجانی اسپایک‌های نامنظم می‌زنند و نودها را نقض می‌کنند. تمرکز روی ETH, AAVE, SOL, LINK و SUI وین‌ریت را به اوج می‌رساند.<br><br>
+                <b>۳. انتقال استاپ به نقطه ورود (Break-Even):</b> بلافاصله با تاچ TP1، استاپ‌لاس به Entry منتقل شود تا در صورت برگشت روند، هیچ معامله سودی به زیان تبدیل نشود.
             </div>
         </div>
     </div>
@@ -709,6 +876,10 @@
         <div class="nav-item active" onclick="switchTab('trades')">
             <span class="nav-icon">📈</span>
             <span>کارنامه</span>
+        </div>
+        <div class="nav-item" onclick="switchTab('journal')">
+            <span class="nav-icon">📖</span>
+            <span>ژورنال</span>
         </div>
         <div class="nav-item" onclick="switchTab('setups')">
             <span class="nav-icon">🎯</span>
@@ -895,20 +1066,24 @@
             document.querySelectorAll('.nav-item').forEach(btn => btn.classList.remove('active'));
 
             document.getElementById('view-trades').style.display = 'none';
+            document.getElementById('view-journal').style.display = 'none';
             document.getElementById('view-setups').style.display = 'none';
             document.getElementById('view-all-coins').style.display = 'none';
             document.getElementById('view-calculator').style.display = 'none';
 
             const tabMap = {
                 'trades': 0,
-                'setups': 1,
-                'all-coins': 2,
-                'calculator': 3
+                'journal': 1,
+                'setups': 2,
+                'all-coins': 3,
+                'calculator': 4
             };
 
-            const idx = tabMap[tab] || 0;
-            document.querySelectorAll('.tab-btn')[idx].classList.add('active');
-            document.querySelectorAll('.nav-item')[idx].classList.add('active');
+            const idx = tabMap[tab] !== undefined ? tabMap[tab] : 0;
+            const tabBtns = document.querySelectorAll('.tab-btn');
+            const navItems = document.querySelectorAll('.nav-item');
+            if (tabBtns[idx]) tabBtns[idx].classList.add('active');
+            if (navItems[idx]) navItems[idx].classList.add('active');
 
             const viewEl = document.getElementById('view-' + tab);
             if (viewEl) viewEl.style.display = 'block';
