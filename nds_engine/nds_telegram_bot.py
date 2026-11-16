@@ -257,12 +257,19 @@ class NDSTelegramNotifier:
         dir_text = "🟢 LONG (خرید)" if direction == "LONG" else "🔴 SHORT (فروش)"
         emoji = "📈" if direction == "LONG" else "📉"
 
+        htf_trend = setup_data.get('htf_trend')
+        htf_line = ""
+        if htf_trend:
+            htf_icon = "🟢 صعودی (BULLISH)" if htf_trend == "BULLISH" else ("🔴 نزولی (BEARISH)" if htf_trend == "BEARISH" else "⚖️ خنثی (NEUTRAL)")
+            htf_line = f"🌊 <b>تاییدیه روند ماکرو (1H):</b> <code>{htf_icon}</code> ✅\n"
+
         msg = (
             f"<b>{emoji} موقعیت طلایی NDS با R/R حداقل ۱:۳ {emoji}</b>\n\n"
             f"▪️ <b>نماد:</b> {symbol}\n"
-            f"▪️ <b>تایم‌فریم:</b> {timeframe}\n"
+            f"▪️ <b>تایم‌فریم معاملاتی:</b> {timeframe}\n"
             f"▪️ <b>ستاپ:</b> 123Flag Setup\n"
-            f"▪️ <b>جهت معامله:</b> {dir_text}\n\n"
+            f"▪️ <b>جهت معامله:</b> {dir_text}\n"
+            f"{htf_line}\n"
             f"📍 <b>نقطه ورود (Entry):</b> <code>{setup_data['entry']:.4f}</code>\n"
             f"🛑 <b>حد ضرر (Stop Loss):</b> <code>{setup_data['sl']:.4f}</code>\n\n"
             f"🎯 <b>تارگت اول (TP1):</b> <code>{setup_data['tp1']:.4f}</code>\n"
@@ -685,6 +692,8 @@ class NDSScannerBot:
         self.tracker = PositionTracker(self.notifier)
         self.alerted_setups = set()
         self._command_listener_running = False
+        self.htf_cache = {}
+        self.enable_htf_filter = True
 
     def start_command_listener(self):
         """Background thread handling Admin approvals and restricted user commands"""
@@ -826,7 +835,26 @@ class NDSScannerBot:
                                     continue
 
                                 # Allowed Commands for Approved Members
-                                if cmd in ["/pnl", "/daily", "/weekly", "/profit", "سود", "برایند", "هفتگی", "ماهانه"]:
+                                if cmd.startswith("/htf"):
+                                    parts = raw_text.split()
+                                    if len(parts) > 1 and parts[1].lower() in ["off", "disable", "خاموش", "غیرفعال"]:
+                                        self.enable_htf_filter = False
+                                        self.notifier.send_message("❌ فیلتر روند ماکرو (HTF Trend Filter) غیرفعال شد.", chat_id=chat_id, with_miniapp_button=False)
+                                    elif len(parts) > 1 and parts[1].lower() in ["on", "enable", "روشن", "فعال"]:
+                                        self.enable_htf_filter = True
+                                        self.notifier.send_message("✅ فیلتر روند ماکرو (HTF Trend Filter) فعال شد.", chat_id=chat_id, with_miniapp_button=False)
+                                    else:
+                                        status = "✅ فعال (Active)" if self.enable_htf_filter else "❌ غیرفعال (Disabled)"
+                                        msg_htf = (
+                                            f"🌊 <b>وضعیت فیلتر روند ماکرو (1H HTF Trend Filter):</b>\n\n"
+                                            f"▪️ <b>وضعیت فعلی:</b> {status}\n"
+                                            f"▪️ <b>عملکرد:</b> ستاپ‌های ۵ دقیقه‌ای تنها در صورتی تایید می‌شوند که هم‌جهت با خط تعادل و امواج ۱ ساعته باشند.\n\n"
+                                            f"دستورات:\n"
+                                            f"▫️ <code>/htf on</code> - فعال‌سازی\n"
+                                            f"▫️ <code>/htf off</code> - غیرفعال‌سازی"
+                                        )
+                                        self.notifier.send_message(msg_htf, chat_id=chat_id, with_miniapp_button=False)
+                                elif cmd in ["/pnl", "/daily", "/weekly", "/profit", "سود", "برایند", "هفتگی", "ماهانه"]:
                                     pnl_rep = self.tracker.get_pnl_report()
                                     self.notifier.send_message(pnl_rep, with_miniapp_button=True, chat_id=chat_id)
                                 elif cmd in ["/journal", "/audit", "ژورنال", "کالبدشکافی", "تحلیل"]:
@@ -871,6 +899,57 @@ class NDSScannerBot:
             df = df.set_index('Time')
             return df
 
+    def get_htf_trend(self, symbol: str) -> dict:
+        """Calculates 1H Higher Timeframe (Macro) trend using NDS equilibrium criteria (EMA20/50).
+        Caches results for 15 minutes to minimize network calls."""
+        now = time.time()
+        if symbol in self.htf_cache and now < self.htf_cache[symbol]["expires_at"]:
+            return self.htf_cache[symbol]
+
+        try:
+            df = self.fetch_candles_kraken(symbol, interval_min=60)
+            if df is None or len(df) < 50:
+                return {"trend": "NEUTRAL", "allowed": "BOTH", "desc": "داده ناکافی 1H"}
+
+            ema20 = df['Close'].ewm(span=20, adjust=False).mean()
+            ema50 = df['Close'].ewm(span=50, adjust=False).mean()
+
+            last_close = float(df['Close'].iloc[-1])
+            last_e20 = float(ema20.iloc[-1])
+            last_e50 = float(ema50.iloc[-1])
+
+            # NDS Macro Equilibrium Hierarchy:
+            # Bullish: Close > EMA50 and EMA20 > EMA50
+            # Bearish: Close < EMA50 and EMA20 < EMA50
+            if last_close > last_e50 and last_e20 > last_e50:
+                trend = "BULLISH"
+                allowed = "LONG_ONLY"
+                desc = "صعودی (بالای خط تعادل EMA50) 📈"
+            elif last_close < last_e50 and last_e20 < last_e50:
+                trend = "BEARISH"
+                allowed = "SHORT_ONLY"
+                desc = "نزولی (زیر خط تعادل EMA50) 📉"
+            else:
+                trend = "NEUTRAL"
+                allowed = "BOTH"
+                desc = "خنثی / تعادلی ⚖️"
+
+            result = {
+                "symbol": symbol,
+                "trend": trend,
+                "allowed": allowed,
+                "close": last_close,
+                "ema20": round(last_e20, 4),
+                "ema50": round(last_e50, 4),
+                "desc": desc,
+                "expires_at": now + 900  # 15 min TTL
+            }
+            self.htf_cache[symbol] = result
+            return result
+        except Exception as e:
+            print(f"Error fetching HTF for {symbol}: {e}", flush=True)
+            return {"trend": "NEUTRAL", "allowed": "BOTH", "desc": "خطا در تحلیل 1H"}
+
     def scan_symbol(self, symbol: str) -> dict:
         try:
             df = self.fetch_candles_kraken(symbol, 5)
@@ -906,6 +985,32 @@ class NDSScannerBot:
             is_recent = (flag_idx >= len(nodes) - 3)
 
             if is_recent and latest.risk_reward >= self.min_rr:
+                setup_dir = latest.direction.value
+
+                # Apply HTF Macro Trend Filter
+                htf_trend_label = "ALIGNED"
+                if self.enable_htf_filter:
+                    htf = self.get_htf_trend(symbol)
+                    if setup_dir == "LONG" and htf["allowed"] == "SHORT_ONLY":
+                        print(f"  ⛔ [HTF Filter] فیلتر ستاپ لانگ {symbol}: روند ماکرو ۱ ساعته نزولی است ({htf['desc']}) - مسدود شد.", flush=True)
+                        return {
+                            "symbol": symbol,
+                            "latest_close": latest_close,
+                            "active_setup": None,
+                            "filtered_reason": "LONG_BLOCKED_BY_1H_BEARISH",
+                            "nodes_count": len(nodes)
+                        }
+                    elif setup_dir == "SHORT" and htf["allowed"] == "LONG_ONLY":
+                        print(f"  ⛔ [HTF Filter] فیلتر ستاپ شورت {symbol}: روند ماکرو ۱ ساعته صعودی است ({htf['desc']}) - مسدود شد.", flush=True)
+                        return {
+                            "symbol": symbol,
+                            "latest_close": latest_close,
+                            "active_setup": None,
+                            "filtered_reason": "SHORT_BLOCKED_BY_1H_BULLISH",
+                            "nodes_count": len(nodes)
+                        }
+                    htf_trend_label = htf.get("trend", "ALIGNED")
+
                 entry = latest.entry_price
                 sl = latest.stop_loss
                 risk = abs(entry - sl)
@@ -933,7 +1038,8 @@ class NDSScannerBot:
                     "tp3": t3,
                     "tp4": t4,
                     "rr": latest.risk_reward,
-                    "timestamp": str(latest.timestamp)
+                    "timestamp": str(latest.timestamp),
+                    "htf_trend": htf_trend_label
                 }
 
         return {
