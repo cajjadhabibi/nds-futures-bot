@@ -17,11 +17,13 @@ from nds_engine.flag_setup import SetupDirection
 CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bot_config.json")
 TRADES_DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "active_trades.json")
 SUBSCRIBERS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "subscribers.json")
+PENDING_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pending_requests.json")
 MINI_APP_URL = "https://nds-futures-market-scanner-telegram-mini-app-for-x5vpqy4cnn.openbot.site"
+ADMIN_CHAT_ID = "5640317397"
 
 def load_config():
     cfg = {
-        "telegram_chat_id": "",
+        "telegram_chat_id": ADMIN_CHAT_ID,
         "symbols": [
             "BTCUSD", "ETHUSD", "SOLUSD", "XRPUSD", "DOGEUSD",
             "SUIUSD", "ADAUSD", "NEARUSD", "TAOUSD", "LINKUSD",
@@ -57,7 +59,7 @@ def load_config():
     cfg["telegram_bot_token"] = token or cfg.get("telegram_bot_token", "")
     return cfg
 
-def load_subscribers(default_chat_id: str = "") -> list:
+def load_subscribers(default_chat_id: str = ADMIN_CHAT_ID) -> list:
     subs = []
     if os.path.exists(SUBSCRIBERS_PATH):
         try:
@@ -65,8 +67,10 @@ def load_subscribers(default_chat_id: str = "") -> list:
                 subs = json.load(f)
         except Exception:
             subs = []
-    if default_chat_id and str(default_chat_id) not in subs:
-        subs.append(str(default_chat_id))
+    # Admin is always permanently in subscribers
+    for cid in [ADMIN_CHAT_ID, default_chat_id]:
+        if cid and str(cid) not in subs:
+            subs.append(str(cid))
     return subs
 
 def add_subscriber(chat_id: str):
@@ -77,12 +81,40 @@ def add_subscriber(chat_id: str):
         try:
             with open(SUBSCRIBERS_PATH, "w", encoding="utf-8") as f:
                 json.dump(subs, f, indent=2)
-            print(f"Added new subscriber: {cid}")
+            print(f"Added new approved subscriber: {cid}")
         except Exception as e:
             print(f"Error saving subscriber: {e}")
 
+def remove_subscriber(chat_id: str) -> bool:
+    subs = load_subscribers()
+    cid = str(chat_id)
+    if cid != ADMIN_CHAT_ID and cid in subs:
+        subs.remove(cid)
+        try:
+            with open(SUBSCRIBERS_PATH, "w", encoding="utf-8") as f:
+                json.dump(subs, f, indent=2)
+            return True
+        except Exception as e:
+            print(f"Error removing subscriber: {e}")
+    return False
+
+def load_pending_requests() -> dict:
+    if os.path.exists(PENDING_PATH):
+        try:
+            with open(PENDING_PATH, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {}
+
+def save_pending_requests(reqs: dict):
+    try:
+        with open(PENDING_PATH, "w", encoding="utf-8") as f:
+            json.dump(reqs, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        print(f"Error saving pending requests: {e}")
+
 def split_text(text: str, max_chars: int = 3800) -> list:
-    """Split message cleanly across lines to never exceed Telegram 4096 char limit"""
     if len(text) <= max_chars:
         return [text]
     parts = []
@@ -102,12 +134,11 @@ def split_text(text: str, max_chars: int = 3800) -> list:
 class NDSTelegramNotifier:
     def __init__(self, bot_token: str = None, chat_id: str = None):
         self.bot_token = bot_token
-        self.chat_id = str(chat_id) if chat_id else ""
-        if self.chat_id:
-            add_subscriber(self.chat_id)
+        self.chat_id = str(chat_id) if chat_id else ADMIN_CHAT_ID
+        add_subscriber(self.chat_id)
 
     def send_message(self, text: str, parse_mode: str = "HTML", with_miniapp_button: bool = True, chat_id: str = None) -> bool:
-        """Send message safely handling character limits and markdown fallback"""
+        """Send message safely handling character limits, broadcast only to approved subscribers"""
         if chat_id:
             targets = [str(chat_id)]
         else:
@@ -130,7 +161,6 @@ class NDSTelegramNotifier:
                 if parse_mode:
                     payload["parse_mode"] = parse_mode
 
-                # Only attach MiniApp button on the final chunk
                 if with_miniapp_button and (idx == len(chunks) - 1):
                     payload["reply_markup"] = {
                         "inline_keyboard": [
@@ -149,8 +179,7 @@ class NDSTelegramNotifier:
                         if res.get("ok"):
                             success = True
                 except urllib.error.HTTPError as e:
-                    print(f"Error sending chunk {idx+1}/{len(chunks)} to {tid}: {e.code}")
-                    # If HTML parsing failed, retry plain text
+                    print(f"Error sending chunk to {tid}: {e.code}")
                     if parse_mode:
                         try:
                             payload.pop("parse_mode", None)
@@ -160,17 +189,68 @@ class NDSTelegramNotifier:
                                 headers={'Content-Type': 'application/json', 'User-Agent': 'NDSBot/1.0'}
                             )
                             with urllib.request.urlopen(req_retry, timeout=10) as resp_retry:
-                                res_retry = json.loads(resp_retry.read().decode())
-                                if res_retry.get("ok"):
+                                if json.loads(resp_retry.read().decode()).get("ok"):
                                     success = True
-                        except Exception as e2:
-                            print(f"Plain text retry failed: {e2}")
+                        except Exception:
+                            pass
                 except Exception as e:
                     print(f"Connection error to {tid}: {e}")
 
-        if success:
-            print(f"[{datetime.now().strftime('%H:%M:%S')}] پیام ({len(chunks)} بخش) به {len(targets)} کاربر تلگرام ارسال شد.")
         return success
+
+    def send_approval_request(self, admin_chat_id: str, user_info: dict) -> bool:
+        """Send interactive permission request card to Admin with Approve and Reject buttons"""
+        cid = user_info['chat_id']
+        name = user_info.get('name', 'ناشناس')
+        username = f"@{user_info['username']}" if user_info.get('username') else "ندارد"
+        text = (
+            f"🔔 <b>درخواست عضویت جدید به ربات و سیگنال‌های NDS!</b>\n"
+            f"━━━━━━━━━━━━━━━━━━\n"
+            f"👤 <b>نام کاربر:</b> {name}\n"
+            f"🔹 <b>یوزرنیم:</b> {username}\n"
+            f"🆔 <b>شناسه عددی (Chat ID):</b> <code>{cid}</code>\n"
+            f"⏱ <b>زمان درخواست:</b> {user_info.get('time', '')}\n\n"
+            f"<i>آیا دسترسی این کاربر به کانال، سیگنال‌ها و مینی‌اپ تایید می‌شود؟</i>"
+        )
+        url = f"https://api.telegram.org/bot{self.bot_token}/sendMessage"
+        payload = {
+            "chat_id": admin_chat_id,
+            "text": text,
+            "parse_mode": "HTML",
+            "reply_markup": {
+                "inline_keyboard": [
+                    [
+                        {"text": "✅ تایید دسترسی", "callback_data": f"approve_{cid}"},
+                        {"text": "❌ رد درخواست", "callback_data": f"reject_{cid}"}
+                    ]
+                ]
+            }
+        }
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode('utf-8'),
+            headers={'Content-Type': 'application/json', 'User-Agent': 'NDSBot/1.0'}
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                return json.loads(resp.read().decode()).get("ok", False)
+        except Exception as e:
+            print(f"Error sending approval card to admin: {e}")
+            return False
+
+    def answer_callback_query(self, callback_query_id: str, text: str = "") -> bool:
+        url = f"https://api.telegram.org/bot{self.bot_token}/answerCallbackQuery"
+        payload = {"callback_query_id": callback_query_id, "text": text}
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode('utf-8'),
+            headers={'Content-Type': 'application/json', 'User-Agent': 'NDSBot/1.0'}
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                return json.loads(resp.read().decode()).get("ok", False)
+        except Exception:
+            return False
 
     def format_alert(self, symbol: str, timeframe: str, setup_data: dict) -> str:
         direction = setup_data['direction']
@@ -224,7 +304,7 @@ class NDSTelegramNotifier:
             f"▫️ <b>نماد:</b> {trade['symbol']}\n"
             f"▫️ <b>جهت معامله:</b> {dir_text}\n"
             f"▫️ <b>قیمت ورود و خروج:</b> <code>{exit_price:.4f}</code>\n"
-            f"<i>ℹ️ به دلیل تاچ شدن تارگت اول در گذشته، سود تارگت قبلی حفظ شد و معامله بدون ضرر بسته شد.</i>"
+            f"<i>ℹ️ به دلیل تاچ شدن تارگت قبلی، سود شناسایی شده حفظ شد و معامله بدون ضرر خارج شد.</i>"
         )
 
     def format_sl_hit(self, trade: dict, sl_price: float) -> str:
@@ -328,7 +408,7 @@ class PositionTracker:
                     msg = self.notifier.format_target_hit(t, "تارگت طلایی ۸۶.۴٪ هوک (TP3)", t["tp3"], current_price, is_final=True)
                     self.notifier.send_message(msg)
 
-                # Check Risk-Free exit (if TP1 hit and price returns to entry)
+                # Check Risk-Free exit
                 elif t.get("is_risk_free") and low <= entry:
                     t["is_closed"] = True
                     t["close_reason"] = "RISK_FREE"
@@ -336,7 +416,7 @@ class PositionTracker:
                     msg = self.notifier.format_risk_free_hit(t, entry)
                     self.notifier.send_message(msg)
 
-                # Check Initial SL (only if TP1 not hit yet)
+                # Check Initial SL
                 elif not t["tp1_hit"] and not t["sl_hit"] and low <= t["sl"]:
                     t["sl_hit"] = True
                     t["is_closed"] = True
@@ -371,7 +451,7 @@ class PositionTracker:
                     msg = self.notifier.format_target_hit(t, "تارگت طلایی ۸۶.۴٪ هوک (TP3)", t["tp3"], current_price, is_final=True)
                     self.notifier.send_message(msg)
 
-                # Check Risk-Free exit (if TP1 hit and price returns to entry)
+                # Check Risk-Free exit
                 elif t.get("is_risk_free") and high >= entry:
                     t["is_closed"] = True
                     t["close_reason"] = "RISK_FREE"
@@ -379,7 +459,7 @@ class PositionTracker:
                     msg = self.notifier.format_risk_free_hit(t, entry)
                     self.notifier.send_message(msg)
 
-                # Check Initial SL (only if TP1 not hit yet)
+                # Check Initial SL
                 elif not t["tp1_hit"] and not t["sl_hit"] and high >= t["sl"]:
                     t["sl_hit"] = True
                     t["is_closed"] = True
@@ -495,7 +575,6 @@ class PositionTracker:
                 trade_ret = -(abs(sl - entry) / entry)
                 is_win = False
 
-            # Model: 10% margin per trade ($10 margin) with 3x leverage
             margin_per_trade = capital * 0.10
             pnl_usd = margin_per_trade * (trade_ret * leverage)
 
@@ -559,14 +638,14 @@ class NDSScannerBot:
         self._command_listener_running = False
 
     def start_command_listener(self):
-        """Background thread listening to user commands (/trades, /status, /start) on Telegram"""
+        """Background thread handling Admin approvals and restricted user commands"""
         if self._command_listener_running or not self.notifier.bot_token:
             return
         self._command_listener_running = True
 
         def loop():
             offset = 0
-            print("Telegram command listener thread started (/trades, /status, /report)...", flush=True)
+            print("Telegram command listener thread started with Admin permission control...", flush=True)
             while True:
                 try:
                     url = f"https://api.telegram.org/bot{self.notifier.bot_token}/getUpdates?offset={offset}&timeout=10"
@@ -576,18 +655,128 @@ class NDSScannerBot:
                         if data.get("ok"):
                             for update in data.get("result", []):
                                 offset = update["update_id"] + 1
+
+                                # 1. Handle Admin Buttons (Approve / Reject)
+                                cb = update.get("callback_query")
+                                if cb:
+                                    cb_id = cb.get("id")
+                                    cb_data = cb.get("data", "")
+                                    cb_from = str(cb.get("from", {}).get("id"))
+
+                                    if cb_from == ADMIN_CHAT_ID:
+                                        if cb_data.startswith("approve_"):
+                                            target_id = cb_data.split("_")[1]
+                                            add_subscriber(target_id)
+                                            pending = load_pending_requests()
+                                            pending.pop(target_id, None)
+                                            save_pending_requests(pending)
+
+                                            self.notifier.answer_callback_query(cb_id, text="کاربر با موفقیت تایید شد.")
+                                            self.notifier.send_message(f"✅ دسترسی کاربر <code>{target_id}</code> با موفقیت تایید شد.", chat_id=ADMIN_CHAT_ID, with_miniapp_button=False)
+                                            
+                                            welcome_user = (
+                                                "🎉 <b>درخواست عضویت شما توسط مدیر تایید شد!</b>\n\n"
+                                                "از هم‌اکنون شما به تمامی ستاپ‌های زنده، تارگت‌ها (TP)، کارنامه معاملات و مینی‌اپ NDS دسترسی دارید.\n\n"
+                                                "▫️ مشاهده معاملات: /trades\n"
+                                                "▫️ سود و برایند: /pnl\n"
+                                                "▫️ لمس دکمه زیر جهت ورود به مینی‌اپ"
+                                            )
+                                            self.notifier.send_message(welcome_user, with_miniapp_button=True, chat_id=target_id)
+
+                                        elif cb_data.startswith("reject_"):
+                                            target_id = cb_data.split("_")[1]
+                                            pending = load_pending_requests()
+                                            pending.pop(target_id, None)
+                                            save_pending_requests(pending)
+
+                                            self.notifier.answer_callback_query(cb_id, text="درخواست رد شد.")
+                                            self.notifier.send_message(f"❌ درخواست کاربر <code>{target_id}</code> رد شد.", chat_id=ADMIN_CHAT_ID, with_miniapp_button=False)
+                                            self.notifier.send_message("❌ درخواست عضویت شما در این ربات خصوصی توسط مدیر رد شد.", chat_id=target_id, with_miniapp_button=False)
+                                    else:
+                                        self.notifier.answer_callback_query(cb_id, text="شما اجازه انجام این عملیات را ندارید.")
+                                    continue
+
+                                # 2. Handle Messages
                                 msg = update.get("message")
                                 if not msg:
                                     continue
                                 chat_id = str(msg.get("chat", {}).get("id"))
+                                from_user = msg.get("from", {})
                                 raw_text = msg.get("text", "").strip()
                                 cmd = raw_text.split()[0].lower() if raw_text else ""
                                 if "@" in cmd:
                                     cmd = cmd.split("@")[0]
 
-                                # Auto subscribe user
-                                add_subscriber(chat_id)
+                                is_admin = (chat_id == ADMIN_CHAT_ID)
+                                approved_list = load_subscribers()
+                                is_approved = (chat_id in approved_list or is_admin)
 
+                                # Admin Specific Commands
+                                if is_admin:
+                                    if cmd in ["/users", "/members", "اعضا", "کاربران"]:
+                                        pending = load_pending_requests()
+                                        msg_u = (
+                                            f"👥 <b>لیست اعضای تاییدشده ({len(approved_list)} نفر):</b>\n"
+                                            + "\n".join([f"• <code>{s}</code>" + (" ⭐️ (مدیر)" if s == ADMIN_CHAT_ID else "") for s in approved_list])
+                                            + f"\n\n⏳ <b>درخواست‌های در انتظار تایید ({len(pending)} نفر):</b>\n"
+                                        )
+                                        if pending:
+                                            for pid, pdata in pending.items():
+                                                msg_u += f"• <code>{pid}</code> ({pdata.get('name')}) | دستور تایید: <code>/approve {pid}</code>\n"
+                                        else:
+                                            msg_u += "<i>هیچ درخواست در انتظاری نیست.</i>"
+                                        self.notifier.send_message(msg_u, chat_id=ADMIN_CHAT_ID, with_miniapp_button=False)
+                                        continue
+
+                                    elif cmd.startswith("/approve"):
+                                        parts = raw_text.split()
+                                        if len(parts) > 1:
+                                            target_id = parts[1].replace("_", "")
+                                            add_subscriber(target_id)
+                                            pending = load_pending_requests()
+                                            pending.pop(target_id, None)
+                                            save_pending_requests(pending)
+                                            self.notifier.send_message(f"✅ کاربر <code>{target_id}</code> با موفقیت تایید شد.", chat_id=ADMIN_CHAT_ID, with_miniapp_button=False)
+                                            self.notifier.send_message("🎉 دسترسی شما توسط مدیر تایید شد!", chat_id=target_id, with_miniapp_button=True)
+                                        continue
+
+                                    elif cmd.startswith("/ban") or cmd.startswith("/remove"):
+                                        parts = raw_text.split()
+                                        if len(parts) > 1:
+                                            target_id = parts[1]
+                                            if target_id != ADMIN_CHAT_ID:
+                                                remove_subscriber(target_id)
+                                                self.notifier.send_message(f"🚫 دسترسی کاربر <code>{target_id}</code> لغو شد.", chat_id=ADMIN_CHAT_ID, with_miniapp_button=False)
+                                                self.notifier.send_message("🚫 دسترسی شما به این ربات توسط مدیر لغو شد.", chat_id=target_id, with_miniapp_button=False)
+                                        continue
+
+                                # Access Gate for Non-Approved Users
+                                if not is_approved:
+                                    pending = load_pending_requests()
+                                    name = f"{from_user.get('first_name', '')} {from_user.get('last_name', '')}".strip() or "ناشناس"
+                                    username = from_user.get("username", "")
+
+                                    pending[chat_id] = {
+                                        "chat_id": chat_id,
+                                        "name": name,
+                                        "username": username,
+                                        "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                                    }
+                                    save_pending_requests(pending)
+
+                                    # Notify applicant
+                                    req_msg = (
+                                        "🔒 <b>این ربات کاملاً خصوصی و اختصاصی است</b>\n\n"
+                                        "درخواست عضویت شما ثبت گردید و برای مدیر ارسال شد.\n"
+                                        "⏳ به محض اینکه مدیر درخواست شما را تایید کند، سیگنال‌ها و مینی‌اپ فعال خواهد شد."
+                                    )
+                                    self.notifier.send_message(req_msg, chat_id=chat_id, with_miniapp_button=False)
+
+                                    # Send approval card to Admin
+                                    self.notifier.send_approval_request(ADMIN_CHAT_ID, pending[chat_id])
+                                    continue
+
+                                # Allowed Commands for Approved Members
                                 if cmd in ["/pnl", "/daily", "/weekly", "/profit", "سود", "برایند", "هفتگی", "ماهانه"]:
                                     pnl_rep = self.tracker.get_pnl_report()
                                     self.notifier.send_message(pnl_rep, with_miniapp_button=True, chat_id=chat_id)
@@ -596,13 +785,12 @@ class NDSScannerBot:
                                     self.notifier.send_message(report, with_miniapp_button=True, chat_id=chat_id)
                                 elif cmd in ["/start", "/help", "شروع", "راهنما"]:
                                     welcome = (
-                                        "🤖 <b>به ربات اسکنر و مینی‌اپ تحلیلی NDS V1.2 خوش آمدید!</b>\n\n"
-                                        "این ربات بازار ۳۰ ارز برتر فیوچرز را برای ستاپ‌های 123Flag با R/R حداقل ۱:۳ پایش کرده و اهداف سود و خروج را رهگیری می‌کند.\n\n"
-                                        "📌 <b>دستورات در دسترس:</b>\n"
-                                        "▫️ /trades یا /status - <i>مشاهده کارنامه معاملات و پوزیشن‌های باز و سودده</i>\n"
-                                        "▫️ /report - <i>آمار وین‌ریت و تعداد تارگت‌های تاچ‌شده</i>\n"
-                                        "▫️ دکمه زیر - <i>ورود به مینی‌اپ با نمودارهای چرخه‌ای زنده</i>\n\n"
-                                        "✨ تمام ستاپ‌ها و لمس تارگت‌ها به صورت لحظه‌ای ارسال می‌شوند."
+                                        "🤖 <b>به ربات اختصاصی NDS V1.2 خوش آمدید!</b>\n\n"
+                                        "شما عضو تاییدشده سیستم هستید و تمامی ستاپ‌های زنده، تارگت‌ها (TP) و استاپ‌ها به صورت خودکار برای شما ارسال می‌شود.\n\n"
+                                        "📌 <b>دستورات مجاز:</b>\n"
+                                        "▫️ /trades یا /status - <i>کارنامه تفکیکی معاملات</i>\n"
+                                        "▫️ /pnl - <i>گزارش سود و برایند روزانه، هفتگی و ماهانه</i>\n"
+                                        "▫️ دکمه زیر - <i>ورود به مینی‌اپ اختصاصی</i>"
                                     )
                                     self.notifier.send_message(welcome, with_miniapp_button=True, chat_id=chat_id)
                 except Exception as e:
@@ -661,7 +849,6 @@ class NDSScannerBot:
 
         if setups:
             latest = setups[-1]
-            # Must be recent swing node
             flag_idx = nodes.index(latest.flag_node) if latest.flag_node in nodes else -1
             is_recent = (flag_idx >= len(nodes) - 3)
 
@@ -670,7 +857,6 @@ class NDSScannerBot:
                 sl = latest.stop_loss
                 risk = abs(entry - sl)
 
-                # Strictly ordered targets based on trade direction
                 if latest.direction == SetupDirection.LONG:
                     t1 = entry + risk * 1.5
                     t2 = entry + risk * 2.5
@@ -728,7 +914,6 @@ class NDSScannerBot:
         print(f"فاصله بررسی: هر {self.poll_interval} ثانیه", flush=True)
         print("در حال پایش بازار و رهگیری تارگت‌ها...\n", flush=True)
 
-        # Start interactive command listener
         self.start_command_listener()
 
         while True:
