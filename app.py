@@ -11,11 +11,36 @@ from nds_engine.nds_telegram_bot import NDSScannerBot
 from nds_engine import cloud_store
 import signal
 
+def load_bybit_state():
+    """Bybit demo account ($100 virtual budget) for the Mini App. Contains no keys."""
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "nds_engine", "exec_state.json")
+    st = {}
+    if os.path.exists(path):
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                st = json.load(f)
+        except Exception:
+            st = {}
+    budget = float(st.get("budget", os.environ.get("DEMO_BUDGET", 100)))
+    realized = float(st.get("realized_pnl", 0.0))
+    return {
+        "configured": bool(os.environ.get("BYBIT_DEMO_API_KEY") and os.environ.get("BYBIT_DEMO_API_SECRET")),
+        "enabled": st.get("enabled", True),
+        "budget": budget,
+        "realized_pnl": realized,
+        "equity": round(budget + realized, 4),
+        "leverage": int(float(os.environ.get("DEMO_LEVERAGE", 3))),
+        "margin_pct": float(os.environ.get("DEMO_MARGIN_PCT", 10)),
+        "positions": st.get("positions", {}),
+        "log": st.get("log", [])[-30:],
+    }
+
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path.startswith('/health'):
             body = json.dumps({"status": "ok", "time": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                               "persistence": cloud_store.enabled()}).encode('utf-8')
+                               "persistence": cloud_store.enabled(),
+                               "bybit_demo": bool(os.environ.get("BYBIT_DEMO_API_KEY") and os.environ.get("BYBIT_DEMO_API_SECRET"))}).encode('utf-8')
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
             self.end_headers()
@@ -50,7 +75,8 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
                 "sl_hit_count": sl_hits,
                 "active_count": active
             },
-            "trades": trades_data
+            "trades": trades_data,
+            "bybit": load_bybit_state()
         }
         self.wfile.write(json.dumps(res, ensure_ascii=False, indent=2).encode('utf-8'))
 

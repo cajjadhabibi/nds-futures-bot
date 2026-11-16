@@ -524,6 +524,8 @@
         <button class="tab-btn" onclick="switchTab('setups')">🎯 ستاپ‌های جدید</button>
         <button class="tab-btn" onclick="switchTab('all-coins')">📊 جدول ۳۰ ارز</button>
         <button class="tab-btn" onclick="switchTab('calculator')">🧮 مدیریت ریسک</button>
+        <button class="tab-btn" onclick="switchTab('pnl30')">💵 حساب ۳۰ روزه</button>
+        <button class="tab-btn" onclick="switchTab('bybit')">🧪 Bybit دمو</button>
     </div>
 
     <!-- VIEW 1: TRADES (Default Tab for /trades) -->
@@ -556,23 +558,24 @@
             </div>
             <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; text-align: center; margin-bottom: 10px;">
                 <div style="background: rgba(0,0,0,0.3); padding: 8px 4px; border-radius: 8px;">
-                    <div style="font-size: 0.62rem; color: var(--text-secondary);">سود ۲۴ ساعت اخیر</div>
-                    <div style="font-size: 0.95rem; font-weight: 800; color: #10b981;" id="pnl-daily">+30.88 $</div>
-                    <div style="font-size: 0.62rem; color: #10b981;">(+30.9%)</div>
+                    <div style="font-size: 0.62rem; color: var(--text-secondary);">سود/زیان امروز</div>
+                    <div style="font-size: 0.95rem; font-weight: 800;" id="pnl-daily">--</div>
+                    <div style="font-size: 0.62rem; color: var(--text-secondary);" id="pnl-daily-pct"></div>
                 </div>
                 <div style="background: rgba(0,0,0,0.3); padding: 8px 4px; border-radius: 8px;">
-                    <div style="font-size: 0.62rem; color: var(--text-secondary);">برآورد هفتگی (۷ روز)</div>
-                    <div style="font-size: 0.95rem; font-weight: 800; color: #3b82f6;" id="pnl-weekly">+216.13 $</div>
-                    <div style="font-size: 0.62rem; color: #3b82f6;">(+216%)</div>
+                    <div style="font-size: 0.62rem; color: var(--text-secondary);">۷ روز اخیر</div>
+                    <div style="font-size: 0.95rem; font-weight: 800;" id="pnl-weekly">--</div>
+                    <div style="font-size: 0.62rem; color: var(--text-secondary);" id="pnl-weekly-pct"></div>
                 </div>
                 <div style="background: rgba(0,0,0,0.3); padding: 8px 4px; border-radius: 8px;">
-                    <div style="font-size: 0.62rem; color: var(--text-secondary);">برآورد ماهانه (۳۰ روز)</div>
-                    <div style="font-size: 0.95rem; font-weight: 800; color: #f59e0b;" id="pnl-monthly">+926.26 $</div>
-                    <div style="font-size: 0.62rem; color: #f59e0b;">(+926%)</div>
+                    <div style="font-size: 0.62rem; color: var(--text-secondary);">از ۱۶ نوامبر تا امروز</div>
+                    <div style="font-size: 0.95rem; font-weight: 800;" id="pnl-monthly">--</div>
+                    <div style="font-size: 0.62rem; color: var(--text-secondary);" id="pnl-monthly-pct"></div>
                 </div>
             </div>
             <div style="font-size: 0.68rem; color: var(--text-secondary); line-height: 1.4;">
-                📌 مبنا: تخصیص ۱۰٪ مارجین (۱۰$) برای هر پوزیشن با لوریج ۳x و خروج خودکار در تارگت‌های NDS.
+                📌 محاسبه واقعی از معاملات بسته‌شده: ۱۰۰$ سرمایه، ۱۰٪ مارجین (۱۰$)، اهرم ۳x، کارمزد ۰.۰۵٪ هر طرف. معامله کاغذی است، نه واقعی.
+                <a href="#" onclick="switchTab('pnl30');return false;" style="color: var(--accent-yellow);">جزئیات روزبه‌روز ←</a>
             </div>
         </div>
 
@@ -871,6 +874,64 @@
         </div>
     </div>
 
+    <!-- VIEW 6: 30-DAY ACCOUNT SIMULATION -->
+    <div id="view-pnl30" style="display: none;">
+        <div class="calculator-card">
+            <h3 style="font-size: 0.95rem; margin-bottom: 6px; color: var(--accent-yellow);">💵 حساب فرضی ۳۰ روزه (۱۶ نوامبر تا ۱۵ دسامبر ۲۰۲۶)</h3>
+            <p style="font-size: 0.7rem; color: var(--text-secondary); margin-bottom: 10px; line-height: 1.5;">
+                اگر هر سیگنال ربات واقعاً با این تنظیمات باز می‌شد. خروج: TP3 در قیمت TP3، استاپ در قیمت SL، ریسک‌فری در قیمت ورود. سود هر معامله در روزی که بسته شده حساب می‌شود.
+            </p>
+            <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px;">
+                <div class="form-group"><label>سرمایه اولیه ($):</label><input type="number" id="sim-capital" value="100" oninput="renderPnl30()"></div>
+                <div class="form-group"><label>مارجین هر پوزیشن (%):</label><input type="number" id="sim-margin" value="10" step="1" oninput="renderPnl30()"></div>
+                <div class="form-group"><label>اهرم (x):</label><input type="number" id="sim-lev" value="3" step="1" oninput="renderPnl30()"></div>
+                <div class="form-group"><label>کارمزد هر طرف (%):</label><input type="number" id="sim-fee" value="0.05" step="0.01" oninput="renderPnl30()"></div>
+            </div>
+            <div class="form-group">
+                <label>روش مارجین:</label>
+                <select id="sim-mode" onchange="renderPnl30()" style="width:100%;padding:8px;border-radius:8px;background:rgba(0,0,0,0.3);color:inherit;border:1px solid var(--border-color, #30363d);">
+                    <option value="fixed">ثابت: ۱۰٪ سرمایه اولیه (۱۰$ در هر معامله)</option>
+                    <option value="compound">مرکب: ۱۰٪ موجودی لحظه‌ای</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="stats-grid" id="sim-summary"></div>
+
+        <div class="calculator-card" style="margin-top: 12px;">
+            <h3 style="font-size: 0.88rem; margin-bottom: 8px;">📅 برایند هفتگی</h3>
+            <div id="sim-weekly" style="overflow-x:auto;"></div>
+        </div>
+
+        <div class="calculator-card" style="margin-top: 12px;">
+            <h3 style="font-size: 0.88rem; margin-bottom: 8px;">🗓️ روزبه‌روز</h3>
+            <div id="sim-daily" style="overflow-x:auto;"></div>
+            <p style="font-size: 0.66rem; color: var(--text-secondary); margin-top: 8px; line-height: 1.5;" id="sim-note"></p>
+        </div>
+    </div>
+
+    <!-- VIEW 7: BYBIT DEMO ($100 budget) -->
+    <div id="view-bybit" style="display: none;">
+        <div class="calculator-card">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+                <h3 style="font-size:0.95rem;color:var(--accent-yellow);">🧪 معاملات Bybit دمو (بودجه ۱۰۰ دلار)</h3>
+                <span id="bb-status" style="font-size:0.68rem;padding:2px 8px;border-radius:6px;"></span>
+            </div>
+            <p style="font-size:0.7rem;color:var(--text-secondary);line-height:1.5;" id="bb-rules"></p>
+        </div>
+        <div class="stats-grid" id="bb-summary" style="margin-top:12px;"></div>
+        <div class="filter-row">
+            <div class="filter-chips">
+                <button class="chip active" onclick="bbFilter('open', this)">⏳ باز (<span id="bb-c-open">0</span>)</button>
+                <button class="chip" onclick="bbFilter('closed', this)">✅ بسته (<span id="bb-c-closed">0</span>)</button>
+                <button class="chip" onclick="bbFilter('log', this)">📜 رویدادها</button>
+            </div>
+            <button class="refresh-btn" onclick="loadLiveTrades()"><span>🔄</span><span>بروزرسانی</span></button>
+        </div>
+        <div id="bb-list"></div>
+        <p style="font-size:0.66rem;color:var(--text-secondary);margin-top:8px;line-height:1.5;" id="bb-note"></p>
+    </div>
+
     <!-- Bottom Navigation -->
     <div class="bottom-nav">
         <div class="nav-item active" onclick="switchTab('trades')">
@@ -892,6 +953,14 @@
         <div class="nav-item" onclick="switchTab('calculator')">
             <span class="nav-icon">🧮</span>
             <span>ریسک</span>
+        </div>
+        <div class="nav-item" onclick="switchTab('pnl30')">
+            <span class="nav-icon">💵</span>
+            <span>۳۰ روز</span>
+        </div>
+        <div class="nav-item" onclick="switchTab('bybit')">
+            <span class="nav-icon">🧪</span>
+            <span>Bybit</span>
         </div>
     </div>
 
@@ -934,15 +1003,28 @@
             }
         }
 
-        function processTradesData(data) {
-            const tradesObj = data.trades || {};
-            allTradesList = Object.values(tradesObj).reverse(); // latest first
+        // Closed trades saved before the cloud server lost its data (server disk resets on redeploy)
+        let tradesArchive = null;
+        async function loadTradesArchive() {
+            if (tradesArchive) return tradesArchive;
+            try {
+                const r = await fetch('trades_archive.json', { cache: 'no-cache' });
+                tradesArchive = r.ok ? ((await r.json()).trades || {}) : {};
+            } catch (e) { tradesArchive = {}; }
+            return tradesArchive;
+        }
 
-            const summary = data.summary || {};
-            const total = summary.total_trades || allTradesList.length;
-            const wins = summary.tp_hit_count || allTradesList.filter(t => t.tp1_hit || t.tp2_hit || t.tp3_hit).length;
-            const losses = summary.sl_hit_count || allTradesList.filter(t => t.sl_hit).length;
-            const active = summary.active_count || allTradesList.filter(t => !t.is_closed).length;
+        async function processTradesData(data) {
+            const archive = await loadTradesArchive();
+            const tradesObj = Object.assign({}, archive, data.trades || {}); // live data wins on same id
+            allTradesList = Object.values(tradesObj)
+                .sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)))
+                .reverse(); // latest first
+
+            const total = allTradesList.length;
+            const wins = allTradesList.filter(t => t.tp1_hit || t.tp2_hit || t.tp3_hit).length;
+            const losses = allTradesList.filter(t => t.sl_hit).length;
+            const active = allTradesList.filter(t => !t.is_closed).length;
             const winrate = (wins + losses > 0) ? ((wins / (wins + losses)) * 100).toFixed(1) : '0';
 
             // Update stats
@@ -956,7 +1038,11 @@
             document.getElementById('count-win').innerText = wins;
             document.getElementById('count-loss').innerText = losses;
 
+            bybitData = data.bybit || bybitData;
             renderTradesCards();
+            updatePnlBox();
+            if (document.getElementById('view-bybit').style.display !== 'none') renderBybit();
+            if (document.getElementById('view-pnl30').style.display !== 'none') renderPnl30();
         }
 
         function renderTradesCards() {
@@ -1051,7 +1137,7 @@
 
         function filterTradeCards(type, el) {
             currentFilter = type;
-            document.querySelectorAll('.chip').forEach(c => c.classList.remove('active'));
+            document.querySelectorAll('#view-trades .chip').forEach(c => c.classList.remove('active'));
             if (el) el.classList.add('active');
             renderTradesCards();
         }
@@ -1070,13 +1156,17 @@
             document.getElementById('view-setups').style.display = 'none';
             document.getElementById('view-all-coins').style.display = 'none';
             document.getElementById('view-calculator').style.display = 'none';
+            document.getElementById('view-pnl30').style.display = 'none';
+            document.getElementById('view-bybit').style.display = 'none';
 
             const tabMap = {
                 'trades': 0,
                 'journal': 1,
                 'setups': 2,
                 'all-coins': 3,
-                'calculator': 4
+                'calculator': 4,
+                'pnl30': 5,
+                'bybit': 6
             };
 
             const idx = tabMap[tab] !== undefined ? tabMap[tab] : 0;
@@ -1094,7 +1184,257 @@
                 renderCoinsList();
             } else if (tab === 'calculator') {
                 calculatePosition();
+            } else if (tab === 'bybit') {
+                renderBybit();
+                loadLiveTrades();
+            } else if (tab === 'pnl30') {
+                renderPnl30();
+                if (!allTradesList.length) loadLiveTrades();
             }
+        }
+
+        // ===== Bybit demo account ($100 virtual budget) =====
+        let bybitData = null;
+        let bbView = 'open';
+        function bbFilter(v, el) {
+            bbView = v;
+            document.querySelectorAll('#view-bybit .chip').forEach(c => c.classList.remove('active'));
+            if (el) el.classList.add('active');
+            renderBybit();
+        }
+        function bbEsc(x) {
+            return String(x == null ? '' : x).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+        }
+        function bbNum(x) { const n = Number(x); return isFinite(n) ? String(Number(n.toPrecision(6))) : '-'; }
+
+        function renderBybit() {
+            const list = document.getElementById('bb-list');
+            if (!list) return;
+            const d = bybitData;
+            if (!d) { list.innerHTML = '<div class="empty-state">در حال دریافت از سرور...</div>'; return; }
+
+            const st = document.getElementById('bb-status');
+            if (!d.configured) { st.innerText = '⚪ وصل نیست'; st.style.background = 'rgba(139,148,158,0.2)'; }
+            else if (!d.enabled) { st.innerText = '⏸️ متوقف'; st.style.background = 'rgba(245,158,11,0.2)'; }
+            else { st.innerText = '🟢 فعال'; st.style.background = 'rgba(16,185,129,0.2)'; }
+
+            const budget = Number(d.budget) || 100;
+            const margin = budget * (Number(d.margin_pct) || 10) / 100;
+            const lev = Number(d.leverage) || 3;
+            document.getElementById('bb-rules').innerText =
+                `هر سیگنال روی حساب دموی Bybit (پول مجازی) باز می‌شود: ${margin.toFixed(0)}$ مارجین، اهرم ${lev}x (پوزیشن ${(margin * lev).toFixed(0)}$)، استاپ و TP3 روی صرافی، ریسک‌فری بعد از TP1. ارزهایی که در Bybit لیست نیستند رد می‌شوند.`;
+
+            const pos = Object.entries(d.positions || {}).map(([id, p]) => Object.assign({ id }, p));
+            const open = pos.filter(p => p.status === 'open' || p.status === 'closing')
+                .sort((a, b) => String(b.opened_at).localeCompare(String(a.opened_at)));
+            const closed = pos.filter(p => p.status === 'closed')
+                .sort((a, b) => String(b.closed_at).localeCompare(String(a.closed_at)));
+            const wins = closed.filter(p => (p.pnl || 0) > 0).length;
+            const net = Number(d.realized_pnl) || 0;
+
+            document.getElementById('bb-summary').innerHTML = `
+                <div class="stat-card"><div class="stat-val" style="color:#f59e0b;">${(Number(d.equity) || budget).toFixed(2)} $</div><div class="stat-lbl">موجودی (از ${budget.toFixed(0)}$)</div></div>
+                <div class="stat-card"><div class="stat-val">${simMoney(net)}</div><div class="stat-lbl">سود/زیان خالص (${(net / budget * 100).toFixed(1)}%)</div></div>
+                <div class="stat-card"><div class="stat-val" style="color:#10b981;">${closed.length ? (wins / closed.length * 100).toFixed(0) : 0}%</div><div class="stat-lbl">وین‌ریت · ${closed.length} بسته</div></div>
+                <div class="stat-card"><div class="stat-val" style="color:#3b82f6;">${open.length}</div><div class="stat-lbl">پوزیشن باز · ${(open.length * margin).toFixed(0)}$ درگیر</div></div>`;
+            document.getElementById('bb-c-open').innerText = open.length;
+            document.getElementById('bb-c-closed').innerText = closed.length;
+
+            const card = (p, isOpen) => {
+                const long = p.direction === 'LONG';
+                const badge = isOpen
+                    ? `<span class="status-badge status-running">${p.status === 'closing' ? '⌛ در حال تسویه' : (p.be ? '🛡️ ریسک‌فری' : '⏳ باز')}</span>`
+                    : `<span class="status-badge ${(p.pnl || 0) >= 0 ? 'status-win' : 'status-loss'}">${simMoney(Number(p.pnl) || 0)}</span>`;
+                const cls = isOpen ? 'active-trade' : ((p.pnl || 0) >= 0 ? 'win' : 'loss');
+                return `<div class="trade-card ${cls}">
+                    <div class="card-top">
+                        <span style="font-weight:800;">${long ? '🟢' : '🔴'} ${bbEsc(p.bybit_symbol)} <span style="font-size:0.7rem;color:var(--text-secondary);">${bbEsc(p.direction)}</span></span>
+                        ${badge}
+                    </div>
+                    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:4px;font-size:0.7rem;text-align:center;margin-top:6px;">
+                        <div><div style="color:var(--text-secondary);">ورود</div>${bbNum(p.fill)}</div>
+                        <div><div style="color:var(--text-secondary);">SL</div>${bbNum(p.sl)}</div>
+                        <div><div style="color:var(--text-secondary);">TP</div>${bbNum(p.tp)}</div>
+                        <div><div style="color:var(--text-secondary);">حجم</div>${bbEsc(p.qty)}</div>
+                    </div>
+                    <div class="card-footer-time">باز: ${bbEsc(p.opened_at)}${p.closed_at ? ' · بسته: ' + bbEsc(p.closed_at) + ' · ' + bbEsc(p.close_why) : ''}</div>
+                </div>`;
+            };
+
+            // Coins not listed on Bybit are skipped silently: hide them from the event list
+            const log = (d.log || []).filter(x => !/not listed on Bybit/i.test(x));
+            if (bbView === 'open') {
+                list.innerHTML = open.length ? open.map(p => card(p, true)).join('') : '<div class="empty-state">پوزیشن بازی نیست.</div>';
+            } else if (bbView === 'closed') {
+                list.innerHTML = closed.length ? closed.map(p => card(p, false)).join('') : '<div class="empty-state">هنوز معامله‌ای بسته نشده.</div>';
+            } else {
+                list.innerHTML = log.length
+                    ? '<div class="calculator-card" style="font-size:0.68rem;line-height:1.8;direction:ltr;text-align:left;">' + log.slice().reverse().map(bbEsc).join('<br>') + '</div>'
+                    : '<div class="empty-state">رویدادی ثبت نشده.</div>';
+            }
+
+            document.getElementById('bb-note').innerText =
+                (d.configured ? '' : 'کلیدهای Bybit دمو هنوز روی سرور تنظیم نشده‌اند؛ بعد از تنظیم، معاملات اینجا نمایش داده می‌شوند. ') +
+                'ارزهای لیست‌نشده در Bybit (مثل FET) نادیده گرفته می‌شوند. BTC با پوزیشن ۳۰ دلاری کمتر از حداقل سفارش Bybit است و معامله نمی‌شود. ' +
+                'حساب دمو با پول مجازی است؛ نتیجه آن تضمین سود واقعی نیست.';
+        }
+
+        // ===== 30-day account simulation (paper) =====
+        const SIM_START = '2026-11-16';
+        const SIM_DAYS = 30;
+
+        function simAddDays(ymd, n) {
+            const d = new Date(ymd + 'T00:00:00Z');
+            d.setUTCDate(d.getUTCDate() + n);
+            return d.toISOString().slice(0, 10);
+        }
+        function simFaDate(ymd) {
+            try { return new Date(ymd + 'T12:00:00Z').toLocaleDateString('fa-IR', { month: 'short', day: 'numeric', timeZone: 'UTC' }); }
+            catch (e) { return ymd.slice(5); }
+        }
+        function simMoney(v) {
+            const s = (v >= 0 ? '+' : '−') + Math.abs(v).toFixed(2) + ' $';
+            return `<span style="color:${v > 0 ? '#10b981' : (v < 0 ? '#ef4444' : 'var(--text-secondary)')};font-weight:700;">${s}</span>`;
+        }
+        // Close moment: created_at date + time of last history event (next day if earlier than open time)
+        function simCloseInfo(t) {
+            const c = String(t.created_at || '');
+            const m = c.match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})/);
+            if (!m) return null;
+            let day = m[1], time = m[2];
+            const last = (t.history || []).length ? String(t.history[t.history.length - 1]) : '';
+            const h = last.match(/(\d{2}:\d{2}:\d{2})/g);
+            if (h) {
+                const ct = h[h.length - 1];
+                if (ct < m[2]) day = simAddDays(day, 1);
+                time = ct;
+            }
+            return { day, key: day + ' ' + time };
+        }
+        function simExitPrice(t) {
+            if (t.close_reason === 'TP3_HIT') return t.tp3;
+            if (t.close_reason === 'SL_HIT') return t.sl;
+            if (t.close_reason === 'RISK_FREE') return t.entry;
+            return null;
+        }
+
+        function computeSim(opts) {
+            const { capital, marginPct, lev, feePct, mode } = opts;
+            const end = simAddDays(SIM_START, SIM_DAYS - 1);
+            const closed = [];
+            let openCount = 0;
+            allTradesList.forEach(t => {
+                const ci = simCloseInfo(t);
+                if (!ci) return;
+                if (!t.is_closed) { if (String(t.created_at).slice(0, 10) >= SIM_START) openCount++; return; }
+                if (String(t.created_at).slice(0, 10) < SIM_START || ci.day > end) return;
+                const px = simExitPrice(t);
+                if (px == null || !t.entry) return;
+                closed.push({ t, ci, px });
+            });
+            closed.sort((a, b) => a.ci.key.localeCompare(b.ci.key));
+
+            const days = {};
+            for (let i = 0; i < SIM_DAYS; i++) days[simAddDays(SIM_START, i)] = { n: 0, tp: 0, sl: 0, rf: 0, pnl: 0 };
+            let bal = capital, peak = capital, maxDD = 0, fees = 0;
+            closed.forEach(({ t, ci, px }) => {
+                const margin = (mode === 'compound' ? bal : capital) * marginPct / 100;
+                const notional = margin * lev;
+                const dir = t.direction === 'SHORT' ? -1 : 1;
+                const fee = notional * feePct / 100 * 2;
+                const pnl = notional * dir * (px - t.entry) / t.entry - fee;
+                fees += fee;
+                bal += pnl;
+                peak = Math.max(peak, bal);
+                maxDD = Math.max(maxDD, (peak - bal) / peak * 100);
+                const d = days[ci.day];
+                d.n++; d.pnl += pnl;
+                if (t.close_reason === 'TP3_HIT') d.tp++; else if (t.close_reason === 'SL_HIT') d.sl++; else d.rf++;
+            });
+            return { days, closed, openCount, finalBal: bal, maxDD, fees };
+        }
+
+        function simOpts() {
+            const num = (id, def) => { const v = parseFloat(document.getElementById(id)?.value); return isFinite(v) ? v : def; };
+            return {
+                capital: num('sim-capital', 100), marginPct: num('sim-margin', 10), lev: num('sim-lev', 3),
+                feePct: num('sim-fee', 0.05), mode: document.getElementById('sim-mode')?.value || 'fixed'
+            };
+        }
+
+        function todayYmd() {
+            const n = new Date();
+            return new Date(n.getTime() - n.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+        }
+
+        function renderPnl30() {
+            const box = document.getElementById('sim-daily');
+            if (!box) return;
+            if (!allTradesList.length) { box.innerHTML = '<div class="empty-state">در حال دریافت معاملات از سرور...</div>'; return; }
+            const o = simOpts();
+            const r = computeSim(o);
+            const today = todayYmd();
+            const keys = Object.keys(r.days);
+            const net = r.finalBal - o.capital;
+            const tot = keys.reduce((a, k) => { const d = r.days[k]; a.n += d.n; a.tp += d.tp; a.sl += d.sl; a.rf += d.rf; return a; }, { n: 0, tp: 0, sl: 0, rf: 0 });
+            const wr = (tot.tp + tot.sl + tot.rf) ? (tot.tp / (tot.tp + tot.sl + tot.rf) * 100).toFixed(1) : '0';
+            const active = keys.filter(k => r.days[k].n > 0);
+            const best = active.length ? active.reduce((a, k) => r.days[k].pnl > r.days[a].pnl ? k : a) : null;
+            const worst = active.length ? active.reduce((a, k) => r.days[k].pnl < r.days[a].pnl ? k : a) : null;
+
+            document.getElementById('sim-summary').innerHTML = `
+                <div class="stat-card"><div class="stat-val" style="color:#f59e0b;">${r.finalBal.toFixed(2)} $</div><div class="stat-lbl">موجودی فعلی (از ${o.capital}$)</div></div>
+                <div class="stat-card"><div class="stat-val">${simMoney(net)}</div><div class="stat-lbl">سود/زیان خالص (${(net / o.capital * 100).toFixed(1)}%)</div></div>
+                <div class="stat-card"><div class="stat-val" style="color:#10b981;">${wr}%</div><div class="stat-lbl">وین‌ریت · ${tot.n} معامله بسته</div></div>
+                <div class="stat-card"><div class="stat-val" style="color:#ef4444;">${r.maxDD.toFixed(1)}%</div><div class="stat-lbl">بیشترین افت حساب</div></div>`;
+
+            // Weekly
+            let wHtml = '<table style="width:100%;font-size:0.72rem;border-collapse:collapse;text-align:center;"><tr style="color:var(--text-secondary);"><th>بازه</th><th>معامله</th><th>TP / SL / RF</th><th>سود/زیان</th><th>موجودی آخر</th></tr>';
+            let run = o.capital;
+            for (let w = 0; w < Math.ceil(SIM_DAYS / 7); w++) {
+                const wk = keys.slice(w * 7, w * 7 + 7);
+                if (!wk.length) break;
+                const s = wk.reduce((a, k) => { const d = r.days[k]; a.n += d.n; a.tp += d.tp; a.sl += d.sl; a.rf += d.rf; a.pnl += d.pnl; return a; }, { n: 0, tp: 0, sl: 0, rf: 0, pnl: 0 });
+                const started = wk[0] <= today;
+                run += s.pnl;
+                const label = (wk.length === 7 ? `هفته ${w + 1}` : `روز ${w * 7 + 1}–${w * 7 + wk.length}`) + `<br><span style="color:var(--text-secondary);font-size:0.62rem;">${simFaDate(wk[0])} – ${simFaDate(wk[wk.length - 1])}</span>`;
+                wHtml += `<tr style="border-top:1px solid rgba(255,255,255,0.08);"><td style="padding:6px 2px;">${label}</td>` +
+                    (started ? `<td>${s.n}</td><td>${s.tp} / ${s.sl} / ${s.rf}</td><td>${simMoney(s.pnl)}</td><td>${run.toFixed(2)} $</td>` : `<td colspan="4" style="color:var(--text-secondary);">⏳ هنوز نرسیده</td>`) + '</tr>';
+            }
+            document.getElementById('sim-weekly').innerHTML = wHtml + '</table>';
+
+            // Daily
+            let dHtml = '<table style="width:100%;font-size:0.72rem;border-collapse:collapse;text-align:center;"><tr style="color:var(--text-secondary);"><th>روز</th><th>تاریخ</th><th>معامله</th><th>TP / SL / RF</th><th>سود/زیان</th><th>موجودی</th></tr>';
+            run = o.capital;
+            keys.forEach((k, i) => {
+                const d = r.days[k];
+                run += d.pnl;
+                const mark = k === today ? ' style="background:rgba(245,158,11,0.1);border-top:1px solid rgba(255,255,255,0.08);"' : ' style="border-top:1px solid rgba(255,255,255,0.08);"';
+                dHtml += `<tr${mark}><td style="padding:5px 2px;">${i + 1}</td><td>${simFaDate(k)}<br><span style="color:var(--text-secondary);font-size:0.6rem;">${k.slice(5)}</span></td>` +
+                    (k <= today ? `<td>${d.n}</td><td>${d.tp} / ${d.sl} / ${d.rf}</td><td>${simMoney(d.pnl)}</td><td>${run.toFixed(2)}</td>` : `<td colspan="4" style="color:var(--text-secondary);">⏳</td>`) + '</tr>';
+            });
+            document.getElementById('sim-daily').innerHTML = dHtml + '</table>';
+
+            document.getElementById('sim-note').innerHTML =
+                `TP = تارگت ۳ · SL = استاپ · RF = خروج ریسک‌فری در نقطه ورود. ` +
+                `${r.openCount} پوزیشن هنوز باز است و حساب نشده. کل کارمزد: ${r.fees.toFixed(2)}$. ` +
+                (best ? `بهترین روز: ${simFaDate(best)} (${r.days[best].pnl.toFixed(2)}$) · بدترین: ${simFaDate(worst)} (${r.days[worst].pnl.toFixed(2)}$). ` : '') +
+                `تاریخ‌ها به وقت سرور ربات است. اسلیپیج و فاندینگ حساب نشده؛ این نتیجه کاغذی است و تضمین سود واقعی نیست.`;
+        }
+
+        function updatePnlBox() {
+            if (!allTradesList.length || !document.getElementById('pnl-daily')) return;
+            const o = { capital: 100, marginPct: 10, lev: 3, feePct: 0.05, mode: 'fixed' };
+            const r = computeSim(o);
+            const today = todayYmd();
+            const sumRange = (from) => Object.keys(r.days).filter(k => k >= from && k <= today).reduce((a, k) => a + r.days[k].pnl, 0);
+            const set = (id, v) => {
+                document.getElementById(id).innerHTML = simMoney(v);
+                document.getElementById(id + '-pct').innerText = '(' + (v >= 0 ? '+' : '') + (v / o.capital * 100).toFixed(1) + '%)';
+            };
+            set('pnl-daily', sumRange(today));
+            set('pnl-weekly', sumRange(simAddDays(today, -6)));
+            set('pnl-monthly', sumRange(SIM_START));
         }
 
         // 30 Coins Data
