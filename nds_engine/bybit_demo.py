@@ -70,6 +70,8 @@ class BybitDemoExecutor:
         self.lock = threading.Lock()
         self.instruments = {}
         self.state = self._load()
+        if self.configured():
+            threading.Thread(target=self.probe, daemon=True).start()
 
     # ---------- infra ----------
     def configured(self):
@@ -122,11 +124,22 @@ class BybitDemoExecutor:
             return {"retCode": -1, "retMsg": str(e)}
 
     def _instrument(self, sym):
+        """Returns (instrument, error). Only a successful empty answer means 'not listed';
+        API/network errors are returned (never cached) so the real cause is visible."""
         if sym not in self.instruments:
             r = self._req("GET", "/v5/market/instruments-info", {"category": "linear", "symbol": sym})
-            lst = r.get("result", {}).get("list", []) if r.get("retCode") == 0 else []
+            if r.get("retCode") != 0:
+                err = f"Bybit API error {r.get('retCode')}: {str(r.get('retMsg', ''))[:150]}"
+                _log(f"instrument {sym}: {err}")
+                return None, err
+            lst = (r.get("result") or {}).get("list") or []
             self.instruments[sym] = lst[0] if lst and lst[0].get("status") == "Trading" else None
-        return self.instruments[sym]
+        return self.instruments[sym], None
+
+    def probe(self):
+        """One connectivity check at startup, written to the server log."""
+        r = self._req("GET", "/v5/market/instruments-info", {"category": "linear", "symbol": "ETHUSDT"})
+        _log(f"probe {BASE_URL}: retCode={r.get('retCode')} msg={str(r.get('retMsg', ''))[:200]}")
 
     def _last_price(self, sym):
         r = self._req("GET", "/v5/market/tickers", {"category": "linear", "symbol": sym})
@@ -171,7 +184,9 @@ class BybitDemoExecutor:
         if trade_id in self.state["positions"]:
             return
         sym = self.bybit_symbol(t["symbol"])
-        inst = self._instrument(sym)
+        inst, err = self._instrument(sym)
+        if err:
+            return self._skip(trade_id, sym, err)
         if not inst:
             return self._skip(trade_id, sym, "not listed on Bybit")
         if any(p["bybit_symbol"] == sym for p in self.open_positions().values()):
