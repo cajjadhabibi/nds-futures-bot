@@ -133,6 +133,32 @@ def split_text(text: str, max_chars: int = 3800) -> list:
         parts.append(curr.strip())
     return parts
 
+# Position sizing shown in every signal (paper): fixed margin x leverage, taker fee per side.
+SIGNAL_MARGIN = float(os.environ.get("SIGNAL_MARGIN", "10"))
+SIGNAL_LEVERAGE = float(os.environ.get("SIGNAL_LEVERAGE", "3"))
+SIGNAL_FEE_RATE = float(os.environ.get("SIGNAL_FEE_PCT", "0.05")) / 100.0
+
+
+def net_pnl(direction: str, entry: float, exit_price: float) -> float:
+    """Net $ of one position (SIGNAL_MARGIN x SIGNAL_LEVERAGE) after entry + exit fees."""
+    entry, exit_price = float(entry), float(exit_price)
+    if entry <= 0:
+        return 0.0
+    notional = SIGNAL_MARGIN * SIGNAL_LEVERAGE
+    qty = notional / entry
+    gross = (exit_price - entry) * qty if direction == "LONG" else (entry - exit_price) * qty
+    return gross - SIGNAL_FEE_RATE * (notional + exit_price * qty)
+
+
+def _usd(v: float) -> str:
+    return f"{'+' if v >= 0 else '−'}{abs(v):.2f}$"
+
+
+def _roe(v: float) -> str:
+    pct = v / SIGNAL_MARGIN * 100 if SIGNAL_MARGIN else 0.0
+    return f"{'+' if pct >= 0 else '−'}{abs(pct):.1f}%"
+
+
 class NDSTelegramNotifier:
     def __init__(self, bot_token: str = None, chat_id: str = None):
         self.bot_token = bot_token
@@ -278,7 +304,13 @@ class NDSTelegramNotifier:
             f"🎯 <b>تارگت دوم (TP2):</b> <code>{setup_data['tp2']:.4f}</code>\n"
             f"🎯 <b>تارگت طلایی (TP3 - ۸۶.۴٪):</b> <code>{setup_data['tp3']:.4f}</code>\n"
             f"🎯 <b>تارگت نهایی (TP4 - چرخه):</b> <code>{setup_data.get('tp4', 0.0):.4f}</code>\n\n"
-            f"💎 <b>نسبت سود به ریسک (R/R):</b> <code>1:{setup_data['rr']:.1f}</code> ✅\n"
+            f"💎 <b>نسبت سود به ریسک (R/R):</b> <code>1:{setup_data['rr']:.1f}</code> ✅\n\n"
+            f"💵 <b>مارجین:</b> <code>{SIGNAL_MARGIN:g}$</code> | <b>اهرم:</b> <code>{SIGNAL_LEVERAGE:g}x</code> | <b>حجم:</b> <code>{SIGNAL_MARGIN * SIGNAL_LEVERAGE:g}$</code>\n"
+            f"💰 <b>سود خالص (پس از کارمزد):</b>\n"
+            f"   TP1: <code>{_usd(net_pnl(direction, setup_data['entry'], setup_data['tp1']))}</code> | "
+            f"TP2: <code>{_usd(net_pnl(direction, setup_data['entry'], setup_data['tp2']))}</code> | "
+            f"TP3: <code>{_usd(net_pnl(direction, setup_data['entry'], setup_data['tp3']))}</code>\n"
+            f"   🛑 SL: <code>{_usd(net_pnl(direction, setup_data['entry'], setup_data['sl']))}</code>\n"
             f"⏱ <b>زمان ثبت:</b> {datetime.now().strftime('%H:%M:%S')}\n\n"
             f"<i>📌 وضعیت تحقق تارگت‌ها لحظه‌ای گزارش می‌شود. برای مشاهده کارنامه دستور /trades را بفرستید.</i>"
         )
@@ -298,7 +330,9 @@ class NDSTelegramNotifier:
             f"▫️ <b>تارگت محقق‌شده:</b> {target_name} (<code>{target_price:.4f}</code>)\n"
             f"▫️ <b>قیمت ورود:</b> <code>{entry:.4f}</code>\n"
             f"▫️ <b>قیمت جاری:</b> <code>{current_price:.4f}</code>\n"
-            f"▫️ <b>میزان سود:</b> <code>+{profit:.4f} $</code> (<b>+{pct:.2f}%</b>)\n\n"
+            f"▫️ <b>حرکت قیمت:</b> <b>+{pct:.2f}%</b>\n"
+            f"▫️ <b>{'سود خالص معامله' if is_final else 'سود خالص تا این تارگت'}:</b> "
+            f"<code>{_usd(net_pnl(trade['direction'], entry, target_price))}</code> ({_roe(net_pnl(trade['direction'], entry, target_price))} روی مارجین {SIGNAL_MARGIN:g}$، اهرم {SIGNAL_LEVERAGE:g}x)\n\n"
         )
         if is_final:
             msg += "💎 <b>نتیجه:</b> چرخه ساختار NDS کامل شد و تمامی سود معامله سیو گردید."
@@ -313,6 +347,7 @@ class NDSTelegramNotifier:
             f"▫️ <b>نماد:</b> {trade['symbol']}\n"
             f"▫️ <b>جهت معامله:</b> {dir_text}\n"
             f"▫️ <b>قیمت ورود و خروج:</b> <code>{exit_price:.4f}</code>\n"
+            f"▫️ <b>سود خالص معامله:</b> <code>{_usd(net_pnl(trade['direction'], trade['entry'], exit_price))}</code> (فقط کارمزد)\n"
             f"<i>ℹ️ به دلیل تاچ شدن تارگت قبلی، سود شناسایی شده حفظ شد و معامله بدون ضرر خارج شد.</i>"
         )
 
@@ -328,7 +363,8 @@ class NDSTelegramNotifier:
             f"▫️ <b>جهت معامله:</b> {dir_text}\n"
             f"▫️ <b>قیمت استاپ:</b> <code>{sl_price:.4f}</code>\n"
             f"▫️ <b>قیمت ورود:</b> <code>{entry:.4f}</code>\n"
-            f"▫️ <b>میزان ضرر:</b> <code>-{loss:.4f} $</code> (-{pct:.2f}%)\n\n"
+            f"▫️ <b>حرکت قیمت:</b> -{pct:.2f}%\n"
+            f"▫️ <b>زیان خالص معامله:</b> <code>{_usd(net_pnl(trade['direction'], entry, sl_price))}</code> ({_roe(net_pnl(trade['direction'], entry, sl_price))} روی مارجین {SIGNAL_MARGIN:g}$، اهرم {SIGNAL_LEVERAGE:g}x)\n\n"
             f"<i>ℹ️ پوزیشن طبق مدیریت سرمایه NDS بسته شد. بازار برای امواج و نودهای بعدی رصد می‌شود.</i>"
         )
         return msg
