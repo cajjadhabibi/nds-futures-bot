@@ -1,6 +1,7 @@
 services:
   - type: web
-    name: nds-telegram-bot
+    name: nds-telegram-bot-eu
+    region: frankfurt
     runtime: python
     buildCommand: pip install -r requirements.txt
     startCommand: python app.py
