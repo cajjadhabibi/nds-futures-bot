@@ -6,7 +6,7 @@ import threading
 import urllib.request
 import urllib.parse
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timezone
 
 # Add workspace to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -444,13 +444,42 @@ class PositionTracker:
                 "close_reason": None,
                 "is_risk_free": False,
                 "created_at": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                "created_ts": time.time(),
                 "history": []
             }
             self.save_trades()
             print(f"[{datetime.now().strftime('%H:%M:%S')}] پوزیشن زنده {setup_id} ثبت شد.")
         return True
 
-    def check_trade(self, symbol: str, high: float, low: float, current_price: float):
+    @staticmethod
+    def _trade_created_ts(t: dict) -> float:
+        """Epoch seconds when the trade was opened (created_at is server UTC)."""
+        if t.get("created_ts"):
+            return float(t["created_ts"])
+        try:
+            return datetime.strptime(t.get("created_at", ""), '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc).timestamp()
+        except Exception:
+            return 0.0
+
+    @staticmethod
+    def _range_since(candles, since_ts: float, current_price: float, strictly_after: bool = False):
+        """High/low of candles that opened at/after since_ts (strictly after when asked),
+        always including the live price. Returns (None, None) if no candles and no price."""
+        highs, lows = [], []
+        if candles is not None and len(candles):
+            for ts, row in candles.iterrows():
+                cts = pd.Timestamp(ts).timestamp()
+                if (cts > since_ts) if strictly_after else (cts >= since_ts):
+                    highs.append(float(row['High']))
+                    lows.append(float(row['Low']))
+        if current_price:
+            highs.append(float(current_price))
+            lows.append(float(current_price))
+        if not highs:
+            return None, None
+        return max(highs), min(lows)
+
+    def check_trade(self, symbol: str, high: float, low: float, current_price: float, candles=None):
         for trade_id, t in list(self.trades.items()):
             if t["symbol"] != symbol or t.get("is_closed"):
                 continue
@@ -459,12 +488,31 @@ class PositionTracker:
             now_str = datetime.now().strftime('%H:%M:%S')
             entry = t["entry"]
 
+            # Use only candles from the trade's own lifetime (not the minutes before entry).
+            if candles is not None:
+                created_ts = self._trade_created_ts(t)
+                bar_start = created_ts - (created_ts % 300)
+                high, low = self._range_since(candles, bar_start, current_price)
+                if high is None:
+                    continue
+            # Risk-free exit may only use prices AFTER TP1 was touched: candles that opened
+            # after that moment plus the live price. Never the old 25-minute window.
+            rf_high, rf_low = high, low
+            if t.get("is_risk_free"):
+                if candles is not None and t.get("rf_ts"):
+                    rf_high, rf_low = self._range_since(candles, float(t["rf_ts"]), current_price, strictly_after=True)
+                else:
+                    rf_high, rf_low = current_price, current_price
+            just_rf = False
+
             # LONG Check
             if direction == "LONG":
                 # Check TP1
                 if not t["tp1_hit"] and high >= t["tp1"]:
                     t["tp1_hit"] = True
                     t["is_risk_free"] = True
+                    t["rf_ts"] = time.time()
+                    just_rf = True
                     t["history"].append(f"TP1 تاچ شد در {now_str}")
                     msg = self.notifier.format_target_hit(t, "تارگت اول (TP1)", t["tp1"], current_price)
                     self.notifier.send_message(msg)
@@ -486,7 +534,7 @@ class PositionTracker:
                     self.notifier.send_message(msg)
 
                 # Check Risk-Free exit
-                elif t.get("is_risk_free") and low <= entry:
+                elif t.get("is_risk_free") and not just_rf and rf_low is not None and rf_low <= entry:
                     t["is_closed"] = True
                     t["close_reason"] = "RISK_FREE"
                     t["history"].append(f"خروج در نقطه ورود (ریسک‌فری) در {now_str}")
@@ -508,6 +556,8 @@ class PositionTracker:
                 if not t["tp1_hit"] and low <= t["tp1"]:
                     t["tp1_hit"] = True
                     t["is_risk_free"] = True
+                    t["rf_ts"] = time.time()
+                    just_rf = True
                     t["history"].append(f"TP1 تاچ شد در {now_str}")
                     msg = self.notifier.format_target_hit(t, "تارگت اول (TP1)", t["tp1"], current_price)
                     self.notifier.send_message(msg)
@@ -529,7 +579,7 @@ class PositionTracker:
                     self.notifier.send_message(msg)
 
                 # Check Risk-Free exit
-                elif t.get("is_risk_free") and high >= entry:
+                elif t.get("is_risk_free") and not just_rf and rf_high is not None and rf_high >= entry:
                     t["is_closed"] = True
                     t["close_reason"] = "RISK_FREE"
                     t["history"].append(f"خروج در نقطه ورود (ریسک‌فری) در {now_str}")
@@ -1049,7 +1099,8 @@ class NDSScannerBot:
             symbol=symbol,
             high=high_val,
             low=low_val,
-            current_price=curr_price
+            current_price=curr_price,
+            candles=df.tail(12)
         )
 
         res = self.analyzer.analyze(df.tail(120))
