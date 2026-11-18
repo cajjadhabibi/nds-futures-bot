@@ -20,6 +20,7 @@ TRADES_DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "activ
 SUBSCRIBERS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "subscribers.json")
 PENDING_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pending_requests.json")
 VOIDED_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "voided_trades.json")
+MISSED_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "missed_signals.json")
 MINI_APP_URL = "https://nds-futures-market-scanner-telegram-mini-app-for-x5vpqy4cnn.openbot.site"
 ADMIN_CHAT_ID = "5640317397"
 
@@ -290,15 +291,19 @@ class NDSTelegramNotifier:
         if htf_trend:
             htf_icon = "🟢 صعودی (BULLISH)" if htf_trend == "BULLISH" else ("🔴 نزولی (BEARISH)" if htf_trend == "BEARISH" else "⚖️ خنثی (NEUTRAL)")
             htf_line = f"🌊 <b>تاییدیه روند ماکرو (1H):</b> <code>{htf_icon}</code> ✅\n"
+        setup_entry = setup_data.get('setup_entry')
+        setup_line = (f"▫️ <i>قیمت ستاپ: {setup_entry:.4f}</i>\n"
+                      if setup_entry and abs(setup_entry - setup_data['entry']) > 1e-12 else "")
 
         msg = (
-            f"<b>{emoji} موقعیت طلایی NDS با R/R حداقل ۱:۳ {emoji}</b>\n\n"
+            f"<b>{emoji} موقعیت طلایی NDS {emoji}</b>\n\n"
             f"▪️ <b>نماد:</b> {symbol}\n"
             f"▪️ <b>تایم‌فریم معاملاتی:</b> {timeframe}\n"
             f"▪️ <b>ستاپ:</b> 123Flag Setup\n"
             f"▪️ <b>جهت معامله:</b> {dir_text}\n"
             f"{htf_line}\n"
-            f"📍 <b>نقطه ورود (Entry):</b> <code>{setup_data['entry']:.4f}</code>\n"
+            f"📍 <b>نقطه ورود (Entry، قیمت لحظه‌ای):</b> <code>{setup_data['entry']:.4f}</code>\n"
+            f"{setup_line}"
             f"🛑 <b>حد ضرر (Stop Loss):</b> <code>{setup_data['sl']:.4f}</code>\n\n"
             f"🎯 <b>تارگت اول (TP1):</b> <code>{setup_data['tp1']:.4f}</code>\n"
             f"🎯 <b>تارگت دوم (TP2):</b> <code>{setup_data['tp2']:.4f}</code>\n"
@@ -368,6 +373,29 @@ class NDSTelegramNotifier:
             f"<i>ℹ️ پوزیشن طبق مدیریت سرمایه NDS بسته شد. بازار برای امواج و نودهای بعدی رصد می‌شود.</i>"
         )
         return msg
+
+
+def stale_reason(setup: dict, live: float):
+    """Why a setup can no longer be entered at the live price, else None.
+    LONG: live >= TP1 or live <= SL; SHORT: the reverse."""
+    sl, tp1 = float(setup["sl"]), float(setup["tp1"])
+    if setup["direction"] == "LONG":
+        if live >= tp1: return "PRICE_PAST_TP1"
+        if live <= sl: return "PRICE_PAST_SL"
+    else:
+        if live <= tp1: return "PRICE_PAST_TP1"
+        if live >= sl: return "PRICE_PAST_SL"
+    return None
+
+
+def rebase_to_live(setup: dict, live: float) -> dict:
+    """Paper entry = live price at send time (SL/TPs stay on the setup's levels); R/R recomputed."""
+    s = dict(setup)
+    s["setup_entry"] = float(setup["entry"])
+    s["entry"] = float(live)
+    risk = abs(s["entry"] - float(s["sl"]))
+    s["rr"] = abs(float(s["tp3"]) - s["entry"]) / risk if risk else 0.0
+    return s
 
 
 def targets_in_order(t: dict) -> bool:
@@ -449,6 +477,37 @@ class PositionTracker:
         except Exception as e:
             print(f"Error saving trades: {e}")
 
+    def _load_missed(self) -> dict:
+        if os.path.exists(MISSED_PATH):
+            try:
+                with open(MISSED_PATH, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except Exception:
+                pass
+        return {}
+
+    def is_missed(self, setup_id: str) -> bool:
+        return setup_id in self._load_missed()
+
+    def record_missed(self, setup_id: str, setup: dict, live: float, why: str):
+        """Signal not sent: price already past TP1/SL. Kept out of all stats."""
+        missed = self._load_missed()
+        missed[setup_id] = {
+            "symbol": setup["symbol"], "direction": setup["direction"],
+            "setup_entry": float(setup["entry"]), "live_price": float(live),
+            "sl": float(setup["sl"]), "tp1": float(setup["tp1"]), "reason": why,
+            "setup_time": setup.get("timestamp", ""),
+            "missed_at": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        }
+        if len(missed) > 500:
+            missed = dict(sorted(missed.items(), key=lambda kv: kv[1]["missed_at"])[-500:])
+        try:
+            with open(MISSED_PATH, "w", encoding="utf-8") as f:
+                json.dump(missed, f, indent=2, ensure_ascii=False)
+        except Exception as e:
+            print(f"Error saving missed signals: {e}")
+        print(f"  [tracker] missed {setup_id}: {why} (setup {float(setup['entry']):g}, live {live:g})", flush=True)
+
     def add_trade(self, setup_id: str, data: dict) -> bool:
         """Register a new signal. Returns False (nothing sent) for a repeat, a coin that
         already has an open trade, or targets out of order."""
@@ -466,6 +525,7 @@ class PositionTracker:
                 "symbol": data["symbol"],
                 "direction": data["direction"],
                 "entry": float(data["entry"]),
+                "setup_entry": float(data.get("setup_entry", data["entry"])),
                 "sl": float(data["sl"]),
                 "tp1": float(data["tp1"]),
                 "tp2": float(data["tp2"]),
@@ -1232,6 +1292,16 @@ class NDSScannerBot:
                 setup_id = f"{sym}_{setup['direction']}_{setup.get('timestamp', '')}"
                 if setup_id not in self.alerted_setups:
                     self.alerted_setups.add(setup_id)
+                    if setup_id in self.tracker.trades or self.tracker.is_missed(setup_id):
+                        continue
+                    # Too late to enter: price already past TP1 or SL -> record as missed, send nothing
+                    live = float(data["latest_close"])
+                    why = stale_reason(setup, live)
+                    if why:
+                        self.tracker.record_missed(setup_id, setup, live, why)
+                        continue
+                    # Enter at the live price, not the older setup price
+                    setup = rebase_to_live(setup, live)
                     # No signal for a repeat (e.g. after a restart), a coin with an open trade, or bad targets
                     if not self.tracker.add_trade(setup_id, setup):
                         continue

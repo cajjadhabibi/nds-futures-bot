@@ -204,6 +204,9 @@ class BybitDemoExecutor:
         long_ = t["direction"] == "LONG"
         if (long_ and not (sl < price < tp)) or (not long_ and not (tp < price < sl)):
             return self._skip(trade_id, sym, f"price {price:g} already outside SL/TP ({sl:g} / {tp:g})")
+        tp1 = t["tp1"] * mult
+        if (long_ and price >= tp1) or (not long_ and price <= tp1):
+            return self._skip(trade_id, sym, f"price {price:g} already past TP1 ({tp1:g})")
 
         lot = inst["lotSizeFilter"]
         notional = margin * LEVERAGE
