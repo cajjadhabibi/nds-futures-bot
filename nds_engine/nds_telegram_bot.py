@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 # Add workspace to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from nds_engine.analyzer import NDSMarketAnalyzer
-from nds_engine.node_detector import NodeType
+from nds_engine.node_detector import NodeType, NodeDetector
 from nds_engine.flag_setup import SetupDirection
 from nds_engine.bybit_demo import BybitDemoExecutor
 
@@ -909,6 +909,7 @@ class NDSScannerBot:
         self.alerted_setups = set()
         self._command_listener_running = False
         self.htf_cache = {}
+        self.htf_node_detector = NodeDetector(3, 3, 0.001)
         self.enable_htf_filter = True
         # Bybit DEMO execution ($100 virtual budget); inactive without BYBIT_DEMO_API_KEY/SECRET
         self.executor = BybitDemoExecutor(
@@ -1129,7 +1130,11 @@ class NDSScannerBot:
             return df
 
     def get_htf_trend(self, symbol: str) -> dict:
-        """Calculates 1H Higher Timeframe (Macro) trend using NDS equilibrium criteria (EMA20/50).
+        """1H (global) trend from the NDS node structure of the same node detector (fractal rule A):
+        last two 1H peaks AND last two 1H valleys higher -> BULLISH (shorts blocked),
+        both lower -> BEARISH (longs blocked), otherwise NEUTRAL (both allowed).
+        Uses closed 1H candles only. Replaced the EMA20/50 filter after a 90-day backtest
+        (29 coins, live-price entry, fees): EMA -14.5$ vs node structure +8.2$.
         Caches results for 15 minutes to minimize network calls."""
         now = time.time()
         if symbol in self.htf_cache and now < self.htf_cache[symbol]["expires_at"]:
@@ -1137,39 +1142,28 @@ class NDSScannerBot:
 
         try:
             df = self.fetch_candles_kraken(symbol, interval_min=60)
-            if df is None or len(df) < 50:
+            if df is None or len(df) < 60:
                 return {"trend": "NEUTRAL", "allowed": "BOTH", "desc": "داده ناکافی 1H"}
 
-            ema20 = df['Close'].ewm(span=20, adjust=False).mean()
-            ema50 = df['Close'].ewm(span=50, adjust=False).mean()
+            closed = df.iloc[:-1].tail(150)          # last row is the still-forming hour
+            nodes = self.htf_node_detector.find_raw_nodes(closed)
+            peaks = [n.price for n in nodes if n.node_type == NodeType.PEAK]
+            valleys = [n.price for n in nodes if n.node_type == NodeType.VALLEY]
 
-            last_close = float(df['Close'].iloc[-1])
-            last_e20 = float(ema20.iloc[-1])
-            last_e50 = float(ema50.iloc[-1])
-
-            # NDS Macro Equilibrium Hierarchy:
-            # Bullish: Close > EMA50 and EMA20 > EMA50
-            # Bearish: Close < EMA50 and EMA20 < EMA50
-            if last_close > last_e50 and last_e20 > last_e50:
-                trend = "BULLISH"
-                allowed = "LONG_ONLY"
-                desc = "صعودی (بالای خط تعادل EMA50) 📈"
-            elif last_close < last_e50 and last_e20 < last_e50:
-                trend = "BEARISH"
-                allowed = "SHORT_ONLY"
-                desc = "نزولی (زیر خط تعادل EMA50) 📉"
-            else:
-                trend = "NEUTRAL"
-                allowed = "BOTH"
-                desc = "خنثی / تعادلی ⚖️"
+            trend, allowed, desc = "NEUTRAL", "BOTH", "خنثی (ساختار نودهای 1H نامشخص) ⚖️"
+            if len(peaks) >= 2 and len(valleys) >= 2:
+                if peaks[-1] > peaks[-2] and valleys[-1] > valleys[-2]:
+                    trend, allowed, desc = "BULLISH", "LONG_ONLY", "صعودی (سقف و کف بالاتر در نودهای 1H) 📈"
+                elif peaks[-1] < peaks[-2] and valleys[-1] < valleys[-2]:
+                    trend, allowed, desc = "BEARISH", "SHORT_ONLY", "نزولی (سقف و کف پایین‌تر در نودهای 1H) 📉"
 
             result = {
                 "symbol": symbol,
                 "trend": trend,
                 "allowed": allowed,
-                "close": last_close,
-                "ema20": round(last_e20, 4),
-                "ema50": round(last_e50, 4),
+                "close": float(df['Close'].iloc[-1]),
+                "peaks": [round(p, 6) for p in peaks[-2:]],
+                "valleys": [round(v, 6) for v in valleys[-2:]],
                 "desc": desc,
                 "expires_at": now + 900  # 15 min TTL
             }
