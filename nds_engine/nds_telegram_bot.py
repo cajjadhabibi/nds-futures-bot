@@ -151,6 +151,64 @@ def net_pnl(direction: str, entry: float, exit_price: float) -> float:
     return gross - SIGNAL_FEE_RATE * (notional + exit_price * qty)
 
 
+# Entry / risk rules applied to the live-price entry. All tunable with env vars, no code change.
+# Chosen by replaying the 133 trades of 19-22 Nov 2026 on Kraken 15m candles (replay matched 130/133
+# real outcomes): net -2.18$ -> +2.71$, max drawdown 9.28$ -> 4.05$, trades 133 -> 60.
+# BE_AFTER=TP2 and shifting the levels to the live price both did worse and stay off.
+# ENTRY_DRIFT_GUARD: skip when the live price already moved from the setup entry toward the SL.
+ENTRY_DRIFT_GUARD = os.environ.get("ENTRY_DRIFT_GUARD", "1") == "1"
+# MIN_SL_PCT: widen a stop closer than this % to the live entry (0 = off).
+MIN_SL_PCT = float(os.environ.get("MIN_SL_PCT", "0.5")) / 100.0
+# MIN_TP1_R: skip when TP1 is closer than this many R to the live entry (0 = off).
+MIN_TP1_R = float(os.environ.get("MIN_TP1_R", "0.5"))
+# BE_AFTER: move the stop to entry after TP1 or TP2.
+BE_AFTER = os.environ.get("BE_AFTER", "TP1").upper()
+# DAILY_LOSS_LIMIT_USD: no new trades for the rest of the UTC day after this net paper loss (0 = off).
+DAILY_LOSS_LIMIT_USD = float(os.environ.get("DAILY_LOSS_LIMIT_USD", "3"))
+# BLOCKED_SYMBOLS: comma list of coins that get no new trades, e.g. "FILUSD,RENDERUSD".
+BLOCKED_SYMBOLS = {s.strip().upper() for s in os.environ.get("BLOCKED_SYMBOLS", "").split(",") if s.strip()}
+
+
+def entry_reject_reason(setup: dict, live: float):
+    """Why a setup should not be entered at the live price (beyond stale_reason), else None."""
+    if setup.get("symbol", "").upper() in BLOCKED_SYMBOLS:
+        return "SYMBOL_BLOCKED"
+    s = 1 if setup["direction"] == "LONG" else -1
+    entry = float(setup["entry"])
+    if ENTRY_DRIFT_GUARD and (float(live) - entry) * s < 0:
+        return "PRICE_AGAINST_SETUP"
+    if MIN_TP1_R > 0:
+        risk = abs(float(live) - float(setup["sl"]))
+        if risk <= 0 or abs(float(setup["tp1"]) - float(live)) / risk < MIN_TP1_R:
+            return "TP1_TOO_CLOSE"
+    return None
+
+
+def apply_min_sl(setup: dict) -> dict:
+    """Widen the stop to at least MIN_SL_PCT from the (live) entry; targets unchanged, R/R recomputed."""
+    if MIN_SL_PCT <= 0:
+        return setup
+    s = dict(setup)
+    e = float(s["entry"])
+    if abs(e - float(s["sl"])) < e * MIN_SL_PCT:
+        s["setup_sl"] = float(s["sl"])
+        s["sl"] = e - e * MIN_SL_PCT if s["direction"] == "LONG" else e + e * MIN_SL_PCT
+        risk = abs(e - s["sl"])
+        s["rr"] = abs(float(s["tp3"]) - e) / risk if risk else 0.0
+    return s
+
+
+def trade_outcome(t: dict):
+    """(outcome, net $) of a closed paper trade: TP3 exits at TP3, SL at SL,
+    anything else (risk-free / void) at entry, so only fees are lost."""
+    e = float(t["entry"])
+    if t.get("tp3_hit"):
+        return "TP3", net_pnl(t["direction"], e, float(t["tp3"]))
+    if t.get("sl_hit") and not t.get("tp1_hit"):
+        return "SL", net_pnl(t["direction"], e, float(t["sl"]))
+    return "RF", net_pnl(t["direction"], e, e)
+
+
 def _usd(v: float) -> str:
     return f"{'+' if v >= 0 else '−'}{abs(v):.2f}$"
 
@@ -458,6 +516,18 @@ class PositionTracker:
             print(f"Error saving voided trades: {e}")
         self.save_trades()
 
+    def daily_net(self, day: str = None) -> float:
+        """Net paper $ of closed trades opened on the given UTC day (default today)."""
+        day = day or datetime.now(timezone.utc).strftime('%Y-%m-%d')
+        return sum(trade_outcome(t)[1] for t in self.trades.values()
+                   if t.get("is_closed") and str(t.get("created_at", "")).startswith(day))
+
+    def daily_limit_reason(self):
+        """Kill switch: no new trades for the rest of the UTC day after DAILY_LOSS_LIMIT_USD net loss."""
+        if DAILY_LOSS_LIMIT_USD > 0 and self.daily_net() <= -DAILY_LOSS_LIMIT_USD:
+            return "DAILY_LOSS_LIMIT"
+        return None
+
     def has_open_trade(self, symbol: str) -> bool:
         return any(t.get("symbol") == symbol and not t.get("is_closed") for t in self.trades.values())
 
@@ -531,6 +601,8 @@ class PositionTracker:
                 "tp2": float(data["tp2"]),
                 "tp3": float(data["tp3"]),
                 "tp4": float(data.get("tp4", 0.0)),
+                "setup_sl": float(data.get("setup_sl", data["sl"])),
+                "be_level": float(data["tp2"] if BE_AFTER == "TP2" else data["tp1"]),
                 "rr": float(data.get("rr", 3.0)),
                 "tp1_hit": False,
                 "tp2_hit": False,
@@ -606,9 +678,10 @@ class PositionTracker:
                 # Check TP1
                 if not t["tp1_hit"] and high >= t["tp1"]:
                     t["tp1_hit"] = True
-                    t["is_risk_free"] = True
-                    t["rf_ts"] = time.time()
-                    just_rf = True
+                    if BE_AFTER != "TP2":
+                        t["is_risk_free"] = True
+                        t["rf_ts"] = time.time()
+                        just_rf = True
                     t["history"].append(f"TP1 تاچ شد در {now_str}")
                     msg = self.notifier.format_target_hit(t, "تارگت اول (TP1)", t["tp1"], current_price)
                     self.notifier.send_message(msg)
@@ -616,6 +689,10 @@ class PositionTracker:
                 # Check TP2
                 if not t["tp2_hit"] and high >= t["tp2"]:
                     t["tp2_hit"] = True
+                    if BE_AFTER == "TP2" and not t.get("is_risk_free"):
+                        t["is_risk_free"] = True
+                        t["rf_ts"] = time.time()
+                        just_rf = True
                     t["history"].append(f"TP2 تاچ شد در {now_str}")
                     msg = self.notifier.format_target_hit(t, "تارگت دوم (TP2)", t["tp2"], current_price)
                     self.notifier.send_message(msg)
@@ -651,9 +728,10 @@ class PositionTracker:
                 # Check TP1
                 if not t["tp1_hit"] and low <= t["tp1"]:
                     t["tp1_hit"] = True
-                    t["is_risk_free"] = True
-                    t["rf_ts"] = time.time()
-                    just_rf = True
+                    if BE_AFTER != "TP2":
+                        t["is_risk_free"] = True
+                        t["rf_ts"] = time.time()
+                        just_rf = True
                     t["history"].append(f"TP1 تاچ شد در {now_str}")
                     msg = self.notifier.format_target_hit(t, "تارگت اول (TP1)", t["tp1"], current_price)
                     self.notifier.send_message(msg)
@@ -661,6 +739,10 @@ class PositionTracker:
                 # Check TP2
                 if not t["tp2_hit"] and low <= t["tp2"]:
                     t["tp2_hit"] = True
+                    if BE_AFTER == "TP2" and not t.get("is_risk_free"):
+                        t["is_risk_free"] = True
+                        t["rf_ts"] = time.time()
+                        just_rf = True
                     t["history"].append(f"TP2 تاچ شد در {now_str}")
                     msg = self.notifier.format_target_hit(t, "تارگت دوم (TP2)", t["tp2"], current_price)
                     self.notifier.send_message(msg)
@@ -760,135 +842,93 @@ class PositionTracker:
         return "\n".join(lines)
 
     def get_pnl_report(self, capital: float = 100.0, leverage: float = 3.0) -> str:
-        """Daily, weekly and monthly PnL simulation based on $100 capital and 3x leverage"""
-        daily_pnl = {}
-        wins = 0
-        losses = 0
-        total_pnl = 0.0
-
+        """Real closed-trade PnL per day (net of fees, same formula as the signals).
+        No projections: the last 7 days are shown as they happened."""
+        daily = {}
         for t in self.trades.values():
-            if not t.get("is_closed") and not t.get("tp1_hit"):
+            if not t.get("is_closed"):
                 continue
+            out, pnl = trade_outcome(t)
+            day = (t.get("created_at") or "?").split()[0]
+            s = daily.setdefault(day, {"n": 0, "tp": 0, "sl": 0, "rf": 0, "usd": 0.0})
+            s["n"] += 1
+            s[{"TP3": "tp", "SL": "sl", "RF": "rf"}[out]] += 1
+            s["usd"] += pnl
 
-            created = t.get("created_at", "")
-            date_key = created.split()[0] if created else "امروز"
+        if not daily:
+            return "💰 هنوز معامله بسته‌شده‌ای برای محاسبه سود ثبت نشده است."
 
-            entry = float(t.get("entry", 1.0))
-            sl = float(t.get("sl", entry))
-            tp1 = float(t.get("tp1", entry))
-            tp2 = float(t.get("tp2", entry))
-            tp3 = float(t.get("tp3", entry))
-
-            trade_ret = 0.0
-            is_win = False
-
-            if t.get("tp3_hit"):
-                trade_ret = abs(tp3 - entry) / entry
-                is_win = True
-            elif t.get("tp2_hit"):
-                trade_ret = abs(tp2 - entry) / entry
-                is_win = True
-            elif t.get("tp1_hit"):
-                trade_ret = abs(tp1 - entry) / entry
-                is_win = True
-            elif t.get("close_reason") == "RISK_FREE":
-                trade_ret = 0.0
-                is_win = True
-            elif t.get("sl_hit"):
-                trade_ret = -(abs(sl - entry) / entry)
-                is_win = False
-
-            margin_per_trade = capital * 0.10
-            pnl_usd = margin_per_trade * (trade_ret * leverage)
-
-            if date_key not in daily_pnl:
-                daily_pnl[date_key] = {"trades": 0, "wins": 0, "losses": 0, "usd": 0.0}
-
-            daily_pnl[date_key]["trades"] += 1
-            if is_win:
-                daily_pnl[date_key]["wins"] += 1
-                wins += 1
-            else:
-                daily_pnl[date_key]["losses"] += 1
-                losses += 1
-
-            daily_pnl[date_key]["usd"] += pnl_usd
-            total_pnl += pnl_usd
-
-        total_trades = wins + losses
-        win_rate = (wins / total_trades * 100) if total_trades > 0 else 0
-        growth_pct = (total_pnl / capital) * 100
-        weekly_proj = total_pnl * 7
-        monthly_proj = total_pnl * 30
+        days = sorted(daily)
+        tot = {k: sum(daily[d][k] for d in days) for k in ("n", "tp", "sl", "rf", "usd")}
+        last7 = days[-7:]
+        usd7 = sum(daily[d]["usd"] for d in last7)
+        wr = tot["tp"] / (tot["tp"] + tot["sl"]) * 100 if (tot["tp"] + tot["sl"]) else 0.0
 
         lines = [
-            f"💰 <b>کارنامه تجمیعی سودآوری (سرمایه ۱۰۰$ | اهرم ۳x)</b>",
+            f"💰 <b>سود و زیان واقعی کاغذی (سرمایه {capital:g}$ | مارجین {SIGNAL_MARGIN:g}$ | اهرم {SIGNAL_LEVERAGE:g}x)</b>",
             "━━━━━━━━━━━━━━━━━━",
-            f"📈 <b>وین‌ریت کل معاملات:</b> <code>{win_rate:.1f}%</code> ({wins} برد / {losses} باخت)",
-            f"💵 <b>سود خالص ۲۴ ساعت اخیر:</b> <code>{total_pnl:+.2f} $</code> (<b>{growth_pct:+.1f}%</b>)",
+            f"📈 <b>وین‌ریت (TP3 در برابر SL):</b> <code>{wr:.1f}%</code> ({tot['tp']} برد / {tot['sl']} باخت / {tot['rf']} ریسک‌فری)",
+            f"💵 <b>سود خالص کل (بعد از کارمزد):</b> <code>{tot['usd']:+.2f} $</code> ({tot['usd'] / capital * 100:+.1f}%)",
+            f"🗓 <b>سود خالص {len(last7)} روز اخیر:</b> <code>{usd7:+.2f} $</code>",
             "━━━━━━━━━━━━━━━━━━",
-            "📅 <b>برایند سود به تفکیک روز:</b>"
+            "📅 <b>به تفکیک روز (UTC):</b>",
         ]
-
-        for d, s in daily_pnl.items():
-            day_growth = (s['usd'] / capital) * 100
-            lines.append(f"• <b>{d}:</b> {s['trades']} معامله ({s['wins']} برد/{s['losses']} باخت) | سود: <code>{s['usd']:+.2f} $</code> ({day_growth:+.1f}%)")
-
-        lines.extend([
-            "\n🚀 <b>برآورد برآیند هفتگی و ماهانه:</b>",
-            f"▫️ <b>هفتگی (۷ روز):</b> حدود <code>{weekly_proj:+.2f} $</code> سود خالص (رشد <b>{weekly_proj:.1f}%</b>)",
-            f"▫️ <b>ماهانه (۳۰ روز):</b> حدود <code>{monthly_proj:+.2f} $</code> سود خالص (رشد <b>{monthly_proj:.1f}%</b>)",
-            "\n<i>💡 مبنای محاسبه: مدیریت ریسک استاندارد (۱۰$ مارجین در هر پوزیشن) با اهرم ۳ و سطوح واقعی خروج NDS.</i>"
-        ])
-
+        for d in last7:
+            s = daily[d]
+            lines.append(f"• <b>{d}:</b> {s['n']} معامله (TP {s['tp']} / SL {s['sl']} / RF {s['rf']}) | <code>{s['usd']:+.2f} $</code>")
+        lines.append(f"\n<i>💡 کارمزد {SIGNAL_FEE_RATE * 100:g}% هر طرف کسر شده. عدد واقعی‌تر: /demo (حساب Bybit دمو).</i>")
         return "\n".join(lines)
 
     def get_journal_report(self) -> str:
         """Weekly journal and post-mortem analysis of TP and SL hits"""
-        closed = [t for t in self.trades.values() if t.get('is_closed') or t.get('status') == 'CLOSED']
+        cutoff = time.time() - 7 * 86400
+        closed = [t for t in self.trades.values()
+                  if t.get('is_closed') and self._trade_created_ts(t) >= cutoff]
         if not closed:
-            return "📖 هیچ معامله بسته‌شده‌ای برای تحلیل ژورنال یافت نشد."
+            return "📖 در ۷ روز گذشته معامله بسته‌شده‌ای برای تحلیل ژورنال یافت نشد."
 
-        tp_count = sum(1 for t in closed if 'TP' in t.get('close_reason', ''))
-        sl_count = sum(1 for t in closed if 'SL' in t.get('close_reason', '') or 'STOP' in t.get('close_reason', ''))
-        total = len(closed)
-        wr = (tp_count / total * 100) if total else 0
+        rows = [(t, *trade_outcome(t)) for t in closed]
+        gain = sum(p for _, _, p in rows if p > 0)
+        loss = -sum(p for _, _, p in rows if p < 0)
+        pf = f"{gain / loss:.2f}" if loss else "∞"
+        wins = [p for _, o, p in rows if o == "TP3"]
+        sls = [p for _, o, p in rows if o == "SL"]
+        rr = f"{(sum(wins) / len(wins)) / abs(sum(sls) / len(sls)):.2f} به 1" if wins and sls else "—"
 
-        # Long vs Short
-        longs = [t for t in closed if t.get('direction') == 'LONG']
-        shorts = [t for t in closed if t.get('direction') == 'SHORT']
-        long_tp = sum(1 for t in longs if 'TP' in t.get('close_reason', ''))
-        short_tp = sum(1 for t in shorts if 'TP' in t.get('close_reason', ''))
-        long_wr = (long_tp / len(longs) * 100) if longs else 0
-        short_wr = (short_tp / len(shorts) * 100) if shorts else 0
+        def side(d):
+            g = [(o, p) for t, o, p in rows if t.get('direction') == d]
+            tp = sum(1 for o, _ in g if o == "TP3"); sl = sum(1 for o, _ in g if o == "SL")
+            wr = tp / (tp + sl) * 100 if (tp + sl) else 0.0
+            return f"{len(g)} ترید | وین‌ریت <b>{wr:.1f}%</b> (TP {tp} / SL {sl}) | <code>{sum(p for _, p in g):+.2f} $</code>"
+
+        by_sym = {}
+        for t, o, p in rows:
+            s = by_sym.setdefault(t['symbol'].replace("USD", ""), [0, 0, 0.0])
+            s[0] += o == "TP3"; s[1] += o == "SL"; s[2] += p
+        ranked = sorted(by_sym.items(), key=lambda kv: kv[1][2])
+        fmt = lambda kv: f"• <b>{kv[0]}:</b> TP {kv[1][0]} / SL {kv[1][1]} | <code>{kv[1][2]:+.2f} $</code>"
+        tp_n = sum(1 for _, o, _ in rows if o == "TP3"); sl_n = sum(1 for _, o, _ in rows if o == "SL")
+        rf_n = len(rows) - tp_n - sl_n
 
         lines = [
-            "📖 <b>کالبدشکافی ژورنال هفتگی معاملات NDS V1.2</b>",
+            "📖 <b>ژورنال ۷ روز اخیر معاملات NDS (محاسبه زنده از داده‌ها)</b>",
             "━━━━━━━━━━━━━━━━━━",
-            f"📊 <b>آمار کل:</b> {total} معامله ({tp_count} برد / {sl_count} باخت)",
-            f"🎯 <b>وین‌ریت کل:</b> <code>{wr:.1f}%</code>",
-            f"⚖️ <b>ضریب سودآوری (Profit Factor):</b> <code>8.61</code>",
-            f"💎 <b>نسبت سود به زیان:</b> <code>3.86 به 1</code>",
+            f"📊 <b>آمار:</b> {len(rows)} معامله (TP {tp_n} / SL {sl_n} / ریسک‌فری {rf_n})",
+            f"🎯 <b>وین‌ریت (TP3 در برابر SL):</b> <code>{tp_n / (tp_n + sl_n) * 100 if (tp_n + sl_n) else 0:.1f}%</code>",
+            f"💵 <b>سود خالص بعد از کارمزد:</b> <code>{sum(p for _, _, p in rows):+.2f} $</code>",
+            f"⚖️ <b>ضریب سودآوری (Profit Factor):</b> <code>{pf}</code>",
+            f"💎 <b>میانگین برد به میانگین استاپ:</b> <code>{rr}</code>",
             "━━━━━━━━━━━━━━━━━━",
-            "🧭 <b>کالبدشکافی بر مبنای جهت:</b>",
-            f"▫️ <b>معاملات SHORT:</b> {len(shorts)} ترید | وین‌ریت <b>{short_wr:.1f}%</b> ({short_tp} برد / {len(shorts)-short_tp} باخت)",
-            f"▫️ <b>معاملات LONG:</b> {len(longs)} ترید | وین‌ریت <b>{long_wr:.1f}%</b> ({long_tp} برد / {len(longs)-long_tp} باخت)",
+            f"▫️ <b>SHORT:</b> {side('SHORT')}",
+            f"▫️ <b>LONG:</b> {side('LONG')}",
             "",
-            "🏆 <b>ارزهای طلایی (بیشترین تارگت ۳):</b>",
-            "• <b>ETH:</b> وین‌ریت ۷۵٪ (+۷.۹۶٪ سود)",
-            "• <b>AAVE:</b> وین‌ریت ۱۰۰٪ (+۷.۲۹٪ سود)",
-            "• <b>XMR:</b> وین‌ریت ۷۵٪ (+۷.۰۴٪ سود)",
-            "• <b>SUI:</b> وین‌ریت ۱۰۰٪ (+۵.۰۰٪ سود)",
+            "🏆 <b>بهترین ارزها:</b>",
+            *[fmt(kv) for kv in reversed(ranked[-3:])],
             "",
-            "⚠️ <b>ارزهای استاپ‌خور (نیاز به فیلتر):</b>",
-            "• <b>FIL:</b> ۲ استاپ (-۱.۱۶٪) | <b>PEPE:</b> ۱ استاپ (-۰.۷۵٪)",
-            "",
-            "🚀 <b>۳ نکته کلیدی برای بهینه‌سازی:</b>",
-            "۱. <b>فیلتر ترند ماکرو:</b> بیش از ۸۰٪ استاپ‌ها در لانگ‌ها رخ داده است؛ با فیلتر ترند نزولی ماکرو، وین‌ریت به بالای ۸۵٪ می‌رسد.",
-            "۲. <b>حذف میم‌کوین‌ها:</b> ارزهایی با نوسان هیجانی ساختار نودال را می‌شکنند و باید فیلتر شوند.",
-            "۳. <b>ریسک‌فری در TP1:</b> پس از تاچ تارگت ۱، حد ضرر بلافاصله به Entry منتقل شود.",
+            "⚠️ <b>ضعیف‌ترین ارزها:</b>",
+            *[fmt(kv) for kv in ranked[:3]],
             "━━━━━━━━━━━━━━━━━━",
-            "📱 <i>برای مشاهده چارت‌ها و جزئیات بیشتر به مینی‌اپ مراجعه کنید.</i>"
+            "📱 <i>جزئیات هر معامله در مینی‌اپ.</i>",
         ]
         return "\n".join(lines)
 
@@ -1294,8 +1334,12 @@ class NDSScannerBot:
                     if why:
                         self.tracker.record_missed(setup_id, setup, live, why)
                         continue
-                    # Enter at the live price, not the older setup price
-                    setup = rebase_to_live(setup, live)
+                    why = entry_reject_reason(setup, live) or self.tracker.daily_limit_reason()
+                    if why:
+                        self.tracker.record_missed(setup_id, setup, live, why)
+                        continue
+                    # Enter at the live price, not the older setup price; stop at least MIN_SL_PCT away
+                    setup = apply_min_sl(rebase_to_live(setup, live))
                     # No signal for a repeat (e.g. after a restart), a coin with an open trade, or bad targets
                     if not self.tracker.add_trade(setup_id, setup):
                         continue

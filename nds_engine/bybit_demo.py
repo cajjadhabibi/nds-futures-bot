@@ -236,7 +236,7 @@ class BybitDemoExecutor:
         self.state["positions"][trade_id] = {
             "bybit_symbol": sym, "direction": t["direction"], "qty": qty, "fill": avg,
             "sl": float(_fmt_price(sl, tick)), "tp": float(_fmt_price(tp, tick)),
-            "tp1": t["tp1"] * mult, "tick": tick, "be": False, "status": "open",
+            "tp1": t["tp1"] * mult, "be_lvl": float(t.get("be_level") or t["tp1"]) * mult, "tick": tick, "be": False, "status": "open",
             "opened_ms": int(time.time() * 1000) - 5000, "opened_at": f"{datetime.now():%Y-%m-%d %H:%M:%S}",
         }
         self._event(f"OPEN {t['direction']} {sym} qty {qty} @ {avg:g}")
@@ -292,7 +292,8 @@ class BybitDemoExecutor:
                 continue
 
             mark = float(lp.get("markPrice") or 0)
-            tp1_hit = paper.get("tp1_hit") or (mark and ((long_ and mark >= p["tp1"]) or (not long_ and mark <= p["tp1"])))
+            be_lvl = p.get("be_lvl", p["tp1"])           # TP1 or TP2, same as the paper risk-free rule
+            tp1_hit = paper.get("is_risk_free") or (mark and ((long_ and mark >= be_lvl) or (not long_ and mark <= be_lvl)))
             if paper.get("is_closed") or tid not in paper_trades:   # closed, or voided by the tracker
                 side = "Sell" if long_ else "Buy"
                 c = self._req("POST", "/v5/order/create", {
