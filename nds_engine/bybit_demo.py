@@ -37,6 +37,8 @@ API_SECRET = os.environ.get("BYBIT_DEMO_API_SECRET", "").strip()
 BUDGET = float(os.environ.get("DEMO_BUDGET", "100"))
 MARGIN_PCT = float(os.environ.get("DEMO_MARGIN_PCT", "10"))
 LEVERAGE = int(float(os.environ.get("DEMO_LEVERAGE", "3")))
+# Closes booked without PnL ("PnL not found") are re-checked for this many days.
+BACKFILL_DAYS = 7
 
 # Kraken symbol (bot) -> Bybit linear symbol. Coins missing here are skipped.
 SYMBOL_MAP = {
@@ -274,6 +276,9 @@ class BybitDemoExecutor:
         for tid, p in list(self.state["positions"].items()):
             if p.get("status") == "closing":
                 self._try_book(tid, p)
+            elif (p.get("status") == "closed" and "PnL not found" in p.get("close_why", "")
+                  and time.time() - p.get("closing_since", 0) < BACKFILL_DAYS * 86400):
+                self._backfill(tid, p)
         opens = {k: p for k, p in self.state["positions"].items() if p.get("status") == "open"}
         if not opens:
             return
@@ -325,12 +330,20 @@ class BybitDemoExecutor:
                 return
             time.sleep(2)
 
-    def _try_book(self, tid, p):
+    def _closed_rows(self, p):
+        """Closed-PnL rows of this position's symbol since it opened; None on an API error."""
         r = self._req("GET", "/v5/position/closed-pnl", {
             "category": "linear", "symbol": p["bybit_symbol"], "startTime": p["opened_ms"], "limit": 50})
-        rows = r.get("result", {}).get("list", []) if r.get("retCode") == 0 else []
+        if r.get("retCode") != 0:
+            _log(f"closed-pnl {p['bybit_symbol']} failed: {r.get('retCode')} {str(r.get('retMsg', ''))[:150]}")
+            return None
+        return (r.get("result") or {}).get("list") or []
+
+    def _try_book(self, tid, p):
+        rows = self._closed_rows(p)
         if not rows and time.time() - p.get("closing_since", 0) < 1800:
-            return False                                 # not published yet: retry next cycle
+            return False                                 # not published yet / API error: retry next cycle
+        rows = rows or []
         why = p.get("close_why", "")
         pnl = sum(float(x.get("closedPnl") or 0) for x in rows)
         if not rows:
@@ -342,6 +355,26 @@ class BybitDemoExecutor:
             f"{'✅' if pnl >= 0 else '🛑'} <b>Bybit Demo — پوزیشن بسته شد</b>\n"
             f"<code>{p['bybit_symbol']}</code> {p['direction']} | سود/زیان: <b>{pnl:+.2f}$</b> ({why})\n"
             f"موجودی بودجه: <b>{self.equity():.2f}$</b> از {self.state.get('budget', BUDGET):.0f}$")
+        return True
+
+    def _backfill(self, tid, p):
+        """A close booked as 0$ because Bybit's closed PnL was missing: book the real PnL once it shows up.
+        Only rows of this position (same entry price, closing side) count, not later trades on the symbol."""
+        rows = self._closed_rows(p)
+        if not rows:
+            return False
+        side = "Sell" if p["direction"] == "LONG" else "Buy"
+        tol = max(float(p.get("tick") or 0) / 2, abs(float(p["fill"])) * 1e-6)
+        mine = [x for x in rows if x.get("side") == side
+                and abs(float(x.get("avgEntryPrice") or 0) - float(p["fill"])) <= tol]
+        if not mine:
+            return False
+        pnl = round(sum(float(x.get("closedPnl") or 0) for x in mine), 4)
+        delta = pnl - float(p.get("pnl") or 0)
+        p.update(pnl=pnl, close_why=p.get("close_why", "").replace("PnL not found", "PnL backfilled"))
+        self.state["realized_pnl"] = round(self.state.get("realized_pnl", 0.0) + delta, 4)
+        self._event(f"BACKFILL {p['bybit_symbol']} {pnl:+.2f}$")
+        _log(f"backfilled {tid}: {pnl:+.4f}$")
         return True
 
     # ---------- report ----------
